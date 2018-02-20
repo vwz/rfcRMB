@@ -1,0 +1,22 @@
+function [a] = fake(X1trn, X2trn, Y1trn)
+
+%setpaths
+size(Y1trn)
+Y1trn(:,1)
+
+length(find(Y1trn==1))
+
+length(find(Y1trn==2))
+
+loc = unique(Y1trn);
+size(loc)
+[m,n]=size(loc);
+
+length(find(Y1trn==1))
+
+length(find(Y1trn==2))
+
+
+a = 1;
+
+end

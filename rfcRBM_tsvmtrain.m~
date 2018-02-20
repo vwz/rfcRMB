@@ -1,0 +1,107 @@
+function [tsvm_obj, v, e, xi, xi_aux, tsvm_labels, tsvm_labels_aux] = rfcRBM_tsvmtrain(batchlabel, batchposhidprobs, batchposhidprobs_aux, maxepoch)
+
+% This program trains TSVM of the following form:
+%	min L2
+%	s.t. R2, R3, R4, R5
+% where
+% 	L2 = sum_m { 1/2*|v_m|^2 + C_m*sum_k xi_mk + C'_m*sum_k xi'_mk },
+%	R2 = forall (m, k), delta(y^k=m)*[v_m*g(x^k) + e_m] >= 1 - xi_mk
+%	R3 = forall (m, k), z'_mk*[v_m*g(x^k) + e_m] >= 1 - xi'_mk
+%	R4 = forall (m, k), xi_mk >= 0
+%	R5 = forall (m, k), xi'_mk >= 0
+%
+% The program assumes that the following variables are set externally:% batchlabel -- the labels that are divided into batches (numcases numbatches), and each label is a location class index; NEED this to cover all locations
+% batchposhidprobs -- the RBM output (probability that each hid as 1) for labeled data (numcases numhid numbatches)
+% batchposhidprobs_aux -- the RBM output (probability that each hid as 1) for unlabeled data (numcases_aux numhid numbatches_aux)
+%
+% The program outputs the following variables:
+% tsvm_obj   -- the objective function value for tsvm
+% v          -- the feature weight for tsvm, it is a numhid*K matrix, each column as the weight for one classifier
+% e          -- the bias for tsvm, it is a 1*K vector, each dimension as the bias for one classifier
+% xi         -- the slack variable for tsvm on labeled data, it is a numcases*numbatches*K tensor
+% xi_aux     -- the slack variable for tsvm on unlabeled data, it is a numcases_aux*numbatches_aux*K tensor
+% tsvm_labels -- the labels (in +1/-1 form for binary classification) for labeled data, it is a numcases*numbatches*K tensor
+% tsvm_labels_aux -- the predicted labels (in +1/-1 form for binary classification) for unlabeled data, it is a numcases_aux*numbatches_aux*K tensor
+
+
+%% pool all the data together
+[numcases numhid numbatches]=size(batchposhidprobs);
+poshidprobs = [];
+for batch = 1:numbatches
+    poshidprobs = [poshidprobs; batchposhidprobs(:, :, batch)];
+end
+
+[numcases_aux numhid numbatches_aux]=size(batchposhidprobs_aux);
+poshidprobs_aux = [];
+for batch = 1:numbatches_aux
+    poshidprobs_aux = [poshidprobs_aux; batchposhidprobs_aux(:, :, batch)];
+end
+
+[numcases numbatches]=size(batchlabel);
+label = [];
+for batch = 1:numbatches
+    label = [label; batchlabel(:, batch)];
+end
+
+%% train K-class tsvm by K binary classifiers
+tsvm_obj = 0;
+K = length(unique(label));
+n1 = numcases*numbatches;
+n2 = numcases_aux*numbatches_aux;
+n = n1 + n2;
+v = zeros(numhid, K);
+e = zeros(1,K);
+xi = zeros(numcases, numbatches, K);
+xi_aux = zeros(numcases_aux, numbatches_aux, K);
+tsvm_labels = zeros(numcases, numbatches, K);
+tsvm_labels_aux = zeros(numcases_aux, numbatches_aux, K);
+
+train = [poshidprobs; poshidprobs_aux];
+for i=1:K
+    %%% set i-th class as +1, and the other classes as -1; set unlabeled data's label as 0
+    ilabel = ones(length(label), 1) .* (label == i);
+    index = find(ilabel == 0);
+    ilabel(index) = -1;
+    train_label = [ilabel; zeros(n2, 1)];
+
+    %%% handle class imbalance, by setting j-value as #(negative)/#(positive)
+    j_value = length(index) / (length(ilabel) - length(index));
+
+    %%% train i-th binary classifier
+    modelname = strcat('tsvm_models/model_', num2str(i));
+    net = svml(modelname, 'Kernel', 0, 'C', 1, 'CostFactor', j_value);
+    svmltrain(net, train, train_label);
+
+    %%%% get bias e and weight v = sum_k alpha_k * x_k, where sum_k is on the support vectors
+    [vm, em] = loadtsvmmodel(modelname);
+    v(:,i) = vm;
+    e(i) = em;
+
+    %%% predict the unlabeled data
+    transductname = strcat('tsvm_models/model_', num2str(i), '.transduction');
+    unlabel = loadtsvmpred(transductname);
+    newlabel = [ilabel; unlabel];
+
+    %%% transform labels into batches
+    tsvm_labels(:,:,i) = reshape(ilabel, [numcases, numbatches]);
+    tsvm_labels_aux(:,:,i) = reshape(unlabel, [numcases_aux, numbatches_aux]);
+
+    %%% predict based on the decision value: v*x - e (according to svmlight)
+    pred = train*vm' - em;
+
+    %%% output the xi values
+    tmpxi = 1 - newlabel.*pred;
+    
+    %%% transform xi into batches
+    xi1 = tmpxi(1:n1);
+    xi(:,:,i) = reshape(xi1, [numcases, numbatches]);
+    xi2 = tmpxi(n1+1:n);
+    xi_aux(:,:,i) = reshape(xi2, [numcases_aux, numbatches_aux]);
+
+    %%% compute objective function L2
+    L2 = norm(vm) + sum(tmpxi);
+    tsvm_obj = tsvm_obj + L2;
+end
+
+
+end

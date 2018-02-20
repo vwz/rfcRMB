@@ -1,0 +1,55 @@
+
+
+
+load rmbmsrdata.mat;
+[errdistA, errdistB] = HLF(X1trn, Y1trn, P1trn, X1tst, P1tst, X2tst, P2tst);
+[errdistA, errdistB] = ULFT(X1trn, Y1trn, P1trn, X2trn, X1tst, P1tst, X2tst, P2tst);
+
+
+addpath '/home/vincentz/workspace/localization/working/';
+addpath '/home/vincentz/workspace/localization/dbn/';
+addpath '/home/vincentz/workspace/localization/working/fullsemi/';
+
+load('dataset2_dbndata.mat');
+X1trn = N8102_xtrn;
+P1trn = N8102_ytrn;
+locations = unique(N8102_ytrn, 'rows');
+[Lia, Y1trn] = ismember(P1trn, locations, 'rows');
+
+X1tst = N8102_xtst;
+P1tst = N8102_ytst;
+X2tst = D901C_xtst;
+P2tst = D901C_ytst;
+
+[errdistA, errdistB] = testHLF(X1trn, Y1trn, P1trn, X1tst, P1tst, X2tst, P2tst)
+
+
+X1trn = N8102_xtrn;
+P1trn = N8102_ytrn;
+locations = unique(N8102_ytrn, 'rows');
+[Lia, Y1trn] = ismember(P1trn, locations, 'rows');
+
+X2trn = D901C_xtrn;
+
+X1tst = N8102_xtst;
+P1tst = N8102_ytst;
+X2tst = D901C_xtst;
+P2tst = D901C_ytst;
+
+[errdistA, errdistB] = ULFT(X1trn, Y1trn, P1trn, X2trn, X1tst, P1tst, X2tst, P2tst);
+
+
+load rmbmsrdata.mat;
+addpath '../libsvm-3.18/matlab/';
+[errdistA, errdistB] = HLF_SVR(X1trn, P1trn, X1tst, P1tst, X2tst, P2tst)
+
+load('dataset2_dbndata.mat');
+X1trn = N8102_xtrn;
+P1trn = N8102_ytrn;
+X1tst = N8102_xtst;
+P1tst = N8102_ytst;
+%X2tst = EEE900A_xtst;
+%P2tst = EEE900A_ytst;
+X2tst = D901C_xtst;
+P2tst = D901C_ytst;
+[errdistA, errdistB] = HLF_SVR(X1trn, P1trn, X1tst, P1tst, X2tst, P2tst)

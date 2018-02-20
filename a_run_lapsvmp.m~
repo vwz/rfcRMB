@@ -1,0 +1,97 @@
+function [acc1 acc2] = a_run_lapsvmp() 
+
+addpath(genpath('/home/vincentz/workspace/localization/working/lapsvmp_v02/'));
+    
+load('rmbmsrdata.mat');
+load('rbm_init.mat');
+
+% Get location index-to-coordinate mapping
+index = unique(Y1tst,'rows'); % find unique location index
+nloc = length(index);
+location = zeros(nloc,2);
+for i=1:nloc
+    j = index(i);
+    tmp = find(Y1tst == j);
+    location(j,:) = P1tst(tmp(1),:);
+end
+
+[numcases numdim numbatches] = size(C1trn);
+D1trn = zeros(numcases, numbatches);
+for batch=1:numbatches
+    [value, index] = ismember(C1trn(:,:,batch), location, 'rows');
+    D1trn(:, batch) = index;
+end
+
+[numcases numhid numbatches]=size(batchposhidprobs);
+poshidprobs = [];
+poshidprobs_aux = [];
+label = [];
+for batch = 1:numbatches
+    poshidprobs = [poshidprobs; batchposhidprobs(:, :, batch)];
+    poshidprobs_aux = [poshidprobs_aux; batchposhidprobs_aux(:, :, batch)];
+    label = [label; D1trn(:,batch)];
+end
+
+X1trn = poshidprobs;
+X2trn = poshidprobs_aux(5,:);
+Y1trn = label;
+
+
+%%%%% lapsvm %%%%%
+%[classifier_all, out, index_map, mod_num, X1trn_all] = a_lap_SVMp(X1trn, X2trn, Y1trn);
+gammaI = 0.1;
+gammaA = 10;
+[X_all, classifier_all, index_map] = rfcRBM_LapSVMtrain(X1trn, X2trn, Y1trn, gammaI, gammaA);
+
+[X1tst] = rbm_layer_feature(NX1tst, vishid, hidbias);
+%[acc1] = a_lap_SVM_check(X1tst, Y1tst, mod_num, index_map, classifier_all, X1trn_all, location);
+[Pred1] = rfcRBM_LapSVMtest(X1tst, X_all, classifier_all, index_map);
+
+[X2tst] = rbm_layer_feature(NX2tst, vishid, hidbias);
+%[acc2] = a_lap_SVM_check(X2tst, Y2tst, mod_num, index_map, classifier_all, X1trn_all, location);
+[Pred2] = rfcRBM_LapSVMtest(X2tst, X_all, classifier_all, index_map);
+
+[acc1] = AccArray(Pred1, Y1tst, location)
+[acc2] = AccArray(Pred2, Y2tst, location)
+
+end
+
+function [acc] = AccArray(pred, gnd, location)
+
+acc = [];
+for errdist=1:1:10
+    acc = [acc; ComputeAccurary(pred, gnd, locations, errdist)];
+end
+
+end
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+
+function [accuracy] = ComputeAccurary(pred, gnd, location, errdist)
+
+% This function computes the accuracy under some certain error distance.
+% It takes the following variable as input:
+% pred     -- the predictions in terms of location index, it is a numcases*1 vector
+% gnd      -- the ground truth in terms of location index, it is a numcases*1 vector
+% location -- the index-to-coordinate mapping system, it is a numloc*2 matrix, each row as the 2D coordinate of a location
+% errdist  -- the error distance threshold that is used to compute the prediction accuracy
+%
+% This function outputs the following variable:
+% acc  -- the accuracy under errdist
+
+gndtruth = location(gnd,:);
+ntotal = length(gndtruth);
+predict = location(pred,:);
+temp = sum((predict-gndtruth).^2,2);
+err = sqrt(mean(temp));
+disp('distance = ');
+disp(err);
+ncorrect = length(find(temp<(errdist^2)));
+accuracy = ncorrect/ntotal;
+
+end

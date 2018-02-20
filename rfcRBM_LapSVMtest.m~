@@ -1,0 +1,50 @@
+function [Pred] = rfcRBM_LapSVMtest(X2tst, F)
+
+%% This program test LapSVM.
+%
+% The program assumes that the following variables are set externally:
+% X2tst  -- the test data, which is a numcases*numhids matrix
+% F      -- the parameters for LapSVM, where
+%    F.X_all            -- the training data, it is a model_num*1 cells, each cell is a numcases*numhids matrix
+%    F.classifier_all   -- the classifiers for each binary classfication task, it is a model_num*1 cells, each cell includes classifier.alpha and classifier.b
+%    F.v_all            -- the support vectors for each binary classfication task, it is a model_num*1 cells, each cell includes v
+%    F.index_map        -- the mapping function between model number and the class pair, it is a model_num*2 matrix, each row (i,j) indicates that class i is +1 and class j is -1
+%
+% The program outputs the following variables:
+% Pred             -- the predicted labels for X2tst
+
+%setpaths
+index_map = F.index_map;
+
+% generating default options
+%% Cg = 0: newton method for optimization in primal form
+%% Verbose = 0: do not output objective function value
+%% Can set 'NN', which by default NN=6
+options = make_options('Kernel', 'linear', 'Cg', 0, 'Verbose', 0);
+
+% initialize
+Pred = [];
+Z_all = [];
+model_num = size(index_map, 1);
+
+% do multi-class classification with a one-vs-one setting
+for i = 1:model_num
+
+    %fprintf('Computing Gram matrix and Laplacian...\n');
+    %data.K = calckernel(options, F(i).X_all, X2tst);        
+
+    %fprintf('Predicting...\n');
+    classifier = F(i).classifier_all;
+    %z = sign(data.K(:,classifier.svs) * classifier.alpha + classifier.b);
+    v = F(i).v_all;
+    e = F(i).classifier_all.b;
+    z = X2tst * v' + e;
+    z(find(z==1)) = index_map(i,1); % assign positive label
+    z(find(z==-1)) = index_map(i,2); % assign negative label
+    
+    Z_all(:,i) = z;    
+end
+    
+Pred = mode(Z_all,2);
+
+end

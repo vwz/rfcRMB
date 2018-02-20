@@ -1,0 +1,49 @@
+function [label] = loadtsvmpred(fname)
+
+%% This function reads tsvm model from disk to the memory.
+%% It takes the following inputs:
+%% fname -- a file name indicating where the tsvm predictions on the unlabeled data is stored
+%%
+%% This function outputs the following variables:
+%% label  -- the predictions on the unlabeled data, it is a numcases*1 vector
+
+modelfl = fopen(fname, 'r');
+
+pos_val=[];
+neg_val=[];
+
+label = [];
+while ~feof(modelfl)
+    tline = fgetl(modelfl);
+    [val1, label1, val2, label2] = strread(tline,'%f:%f %f:%f\n');
+
+    pos_val = 0;
+    neg_val = 0;
+
+    if label1==1
+        pos_val = val1;
+    else
+        neg_val = val1;
+    end
+
+    if label2==-1
+        neg_val = val2;
+    else
+        pos_val = val2;
+    end
+
+    if (pos_val >= neg_val) 
+	label = [label; +1];
+    else
+	label = [label; -1];
+    end
+end
+
+fclose (modelfl);
+
+end
+
+
+
+
+

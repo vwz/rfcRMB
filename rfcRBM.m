@@ -1,0 +1,73 @@
+function [acc1 acc2] = rfcRBM(B1trn, B2trn, D1trn, NX1tst, NX2tst, Y1tst, Y2tst, location)
+
+% This program trains and test the rfcRBM. 
+% The program assumes that the following variables are set externally:
+% B1trn  -- device 1's training data, divided into batches (numcases numdims numbatches)
+% B2trn  -- device 2's training data, divided into batches (numcases_aux numdims numbatches_aux)
+% D1trn  -- device 1's training labels, divided into batches (numcases numbatches), each entry is a location index (ranging from 1 to N, for N unique locations)
+% NX1tst -- device 1's test data, it is a matrix (numcases numdims) 
+% NX2tst -- device 2's test data, it is a matrix (numcases_aux numdims) 
+% Y1tst  -- device 1's test labels, it is a vector (numcases 1) 
+% Y2tst  -- device 2's test labels, it is a vector (numcases_aux 1) 
+% location -- the location's detailed coordinates, it is a matrix (numlocs 2), each entry i is the coordinates for location i
+%
+% The program outputs the following variables:
+% acc1   -- the accuracy for device 1 under different error distances, it is a vector (numerrdist 1)
+% acc1   -- the accuracy for device 2 under different error distances, it is a vector (numerrdist 1)
+
+%% generate parameter options
+params = struct('maxepoch', 10, ...
+                 'maxepoch_rbm_noinit', 3000, ...
+                 'maxepoch_rbm_init', 200, ...
+                 'numhid', 100, ...
+                 'gammaI', 0.1, ... 
+                 'gammaA', 10, ...
+		 'NN', 2, ...
+                 'lambda1', 100, ...
+                 'lambda2', 100, ... 
+		 'samplerate', 0.01);
+
+% do training
+disp('training');
+%[Theta, F] = rfcRBM_train(B1trn, B2trn, D1trn, params);
+[Theta, F] = rfcRBM_train_eval(B1trn, B2trn, D1trn, params, NX1tst, NX2tst, Y1tst, Y2tst, location);
+
+% do testing
+[Pred1] = rfcRBM_test(NX1tst, Theta, F);
+[Pred2] = rfcRBM_test(NX2tst, Theta, F);
+
+% evaluate error
+acc1 = [];
+acc2 = [];for errdist=1:1:10
+    acc1 = [acc1; ComputeAccurary(Pred1, Y1tst, location, errdist)];
+    acc2 = [acc2; ComputeAccurary(Pred2, Y2tst, location, errdist)];
+end
+
+end 
+
+
+function [acc] = ComputeAccurary(pred, gnd, location, errdist)
+
+% This function computes the accuracy under some certain error distance.
+% It takes the following variable as input:
+% pred     -- the predictions in terms of location index, it is a numcases*1 vector
+% gnd      -- the ground truth in terms of location index, it is a numcases*1 vector
+% location -- the index-to-coordinate mapping system, it is a numloc*2 matrix, each row as the 2D coordinate of a location
+% errdist  -- the error distance threshold that is used to compute the prediction accuracy
+%
+% This function outputs the following variable:
+% acc  -- the accuracy under errdist
+
+ncorrect = 0;
+ntotal = 0;
+n = length(gnd);
+for i=1:n
+    gndtruth = location(gnd(i),:);
+    ntotal = ntotal + size(gndtruth,1);
+    predict = location(pred(i),:);
+    temp = sum((predict-gndtruth).^2,2);
+    ncorrect = ncorrect + length(find(temp<(errdist^2)));
+end
+acc = ncorrect/ntotal;
+
+end

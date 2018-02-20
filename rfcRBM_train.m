@@ -1,0 +1,81 @@
+function [Theta, F] = rfcRBM_train(batchdata, batchdata_aux, batchlabel, params)
+
+% This program trains the rfcRBM. 
+%
+% The program assumes that the following variables are set externally:
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases numbatches), and each label is a location class index
+
+maxepoch = params.maxepoch;
+
+% data
+Y1trn = reshape(batchlabel, [size(batchlabel,1)*size(batchlabel,2), 1]);
+
+% first train a pairwise feature regularized RBM for initialization
+[Theta, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbminit(batchdata, batchdata_aux, params);
+
+% compute the adjacency matrix according to the initialized RBM feature
+[batchtau] = ComputeAdjacency(batchposhidprobs, params);
+[batchtau_aux] = ComputeAdjacency(batchposhidprobs_aux, params);
+
+% do LapSVM, with initilized RBM presentation
+X1trn = Tensor2Matrix(batchposhidprobs);
+X2trn = Tensor2Matrix(batchposhidprobs_aux);
+[F] = rfcRBM_LapSVMtrain(X1trn, X2trn, Y1trn, params);
+
+% do training iterations
+for epoch = 1:maxepoch
+    fprintf(1,'training epoch %d\n',epoch);
+    
+    % do regularized RBM, with LapSVM output
+    [Theta, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbmtrain(batchdata, batchdata_aux, batchlabel, batchtau, batchtau_aux, params, Theta, F);
+
+    % do LapSVM, with regularized RBM output
+    X1trn = Tensor2Matrix(batchposhidprobs);
+    X2trn = Tensor2Matrix(batchposhidprobs_aux); 
+    [F] = rfcRBM_LapSVMtrain(X1trn, X2trn, Y1trn, params);
+end
+
+end
+
+
+function [batchtau] = ComputeAdjacency(batchdata, params) 
+
+% This program computes the adjacency matrix for each batch of batchdata.
+% The program assumes that the following variables are set externally:% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+%
+% The program outputs the following variables:
+% batchtau   -- the adjacency matrix based on batchdata, it is a numbatches*1 cell array, each cell is a sparse matrix on numcases*numcases
+
+[numcases, numhid, numbatches] = size(batchdata);
+batchtau = [];
+for batch=1:numbatches
+    X = batchdata(:,:,batch);
+    W = [];
+    if (size(X,1) > params.NN)
+	options = make_options('NN', params.NN);
+	W = adjacency(options, X);
+    end
+    batchtau{batch} = W;
+end
+
+end
+
+function [m] = Tensor2Matrix(t)
+
+%% This program converts a tensor (ndim1, ndim2, ndim3) into a matrix (ndim1*ndim3, ndim2)
+%
+% The program assumes that the following variables are set externally:
+% t  -- the tensor, whose dimensions are (ndim1, ndim2, ndim3)
+%
+% The program outputs the following variables:
+% m  -- the matrix, whose dimensions are (ndim1*ndim3, ndim2)
+
+[ndim1, ndim2, ndim3] = size(t);
+m = [];
+for i = 1:ndim3
+    m = [m; t(:,:,i)];
+end
+
+end

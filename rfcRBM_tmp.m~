@@ -1,0 +1,131 @@
+function [acc1 acc2] = rfcRBM_tmp(numhid)
+
+% Constrained RBM + TSVM
+% device A full, device B unlabeled data
+
+addpath '/home/vincentz/workspace/localization/working/svml';
+
+load rmbmsrdata.mat; %mean
+addpath '../dbn/';
+
+maxepoch = 0;
+maxepoch_rbm = 20;
+restart = 1;
+%numhid = 100;
+
+% Get location index-to-coordinate mapping
+index = unique(Y1tst,'rows'); % find unique location index
+nloc = length(index);
+location = zeros(nloc,2);
+for i=1:nloc
+    j = index(i);
+    tmp = find(Y1tst == j);
+    location(j,:) = P1tst(tmp(1),:);
+end
+
+% data
+% batchdata = B1trn, batchlabel = C1trn, batchdata_aux = B2trn
+
+%-----------------------------------------------------------------------
+
+% do training
+disp('training');
+[numcases numdim numbatches] = size(C1trn);
+D1trn = zeros(numcases, numbatches);
+for batch=1:numbatches
+    [value, index] = ismember(C1trn(:,:,batch), location, 'rows');
+    D1trn(:, batch) = index;
+end
+
+[v, e, vishid, hidbias] = rfcRBM_train_tune(B1trn, B2trn, D1trn, maxepoch, maxepoch_rbm, numhid);
+
+% data
+batchdata = B1trn;
+batchdata_aux = B2trn;
+batchlabel = D1trn;
+
+[numcases numdims numbatches]=size(batchdata);
+[numcases_aux numdims_aux numbatches_aux]=size(batchdata_aux);
+
+% first train a pairwise feature regularized RBM for initialization
+[rbm_obj, vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbminit_tune(batchdata, batchdata_aux, numhid, maxepoch_rbm);
+
+% do MSR, with initilized RBM presentation
+
+
+% do testing
+[poshidprobs] = rbm_layer_feature(NX1tst, vishid, hidbias);
+pred1 = Predict(poshidprobs, v, e);
+% SVM directly on original data
+%pred1 = Predict(NX1tst, v, e);
+
+[poshidprobs] = rbm_layer_feature(NX2tst, vishid, hidbias);
+pred2 = Predict(poshidprobs, v, e);
+% SVM directly on original data
+%pred2 = Predict(NX2tst, v, e);
+
+% save the predictions
+save('prediction', 'pred1', 'pred2');
+
+% evaluate error
+acc1 = [];
+acc2 = [];for errdist=1:1:10
+    acc1 = [acc1; ComputeAccurary(pred1, Y1tst, location, errdist)];
+    acc2 = [acc2; ComputeAccurary(pred2, Y2tst, location, errdist)];
+end
+
+disp(acc1);
+disp(acc2);
+
+end 
+
+
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+
+function [label] = Predict(poshidprobs, v, e)
+
+% This function takes the following variables as input:
+% poshidprobs -- RBM feature representation for the data, it is a numcases*numhid matrix
+% v  -- tsvm feature weight, it is a numhid*K matrix, where each v(:,i) is the weight for i-th binary classifier
+% e  -- tsvm bias, it is a 1*K vector, where each e(i) is the bias for i-th binary classifier
+%
+% This function outputs the following variable:
+% pred -- class label, it is a numcases*1 vector
+
+numcases = size(poshidprobs,1);
+pred = poshidprobs * v - repmat(e, [numcases, 1]);
+[value, index] = max(pred, [], 2);  % find the max value along the columns (i.e., for each row, find the classifier with max output)
+label = index;
+
+end
+
+
+function [accuracy] = ComputeAccurary(pred, gnd, location, errdist)
+
+% This function computes the accuracy under some certain error distance.
+% It takes the following variable as input:
+% pred     -- the predictions in terms of location index, it is a numcases*1 vector
+% gnd      -- the ground truth in terms of location index, it is a numcases*1 vector
+% location -- the index-to-coordinate mapping system, it is a numloc*2 matrix, each row as the 2D coordinate of a location
+% errdist  -- the error distance threshold that is used to compute the prediction accuracy
+%
+% This function outputs the following variable:
+% acc  -- the accuracy under errdist
+
+gndtruth = location(gnd,:);
+ntotal = length(gndtruth);
+predict = location(pred,:);
+temp = sum((predict-gndtruth).^2,2);
+err = sqrt(mean(temp));
+disp('distance = ');
+disp(err);
+ncorrect = length(find(temp<(errdist^2)));
+accuracy = ncorrect/ntotal;
+
+end

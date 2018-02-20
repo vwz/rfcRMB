@@ -1,0 +1,83 @@
+RBM->MSR, momentum remains the same for unlabeled data and labeled data, but discount the unlabeled data's input in RBM gradient, 
+
+*0.1
+[2.27, 5.64]
+
+*0.01
+[2.31, 5.57]
+
+*0.001
+[2.08, 5.56]
+
+*1
+[1.94, 8.33] (msr step length = 0.05), [2.94, 10.45] (msr step length = 0.1)
+
+*10
+[2.33, 7.80] (msr step length = 0.05), [2.16, 7.06] (msr step length = 0.1)
+
+RBM -> MSR, discount unlabeled data's input in RBM gradient as *0.01, then tune unlabeled data contribution in MSR
+
+*0
+[2.31, 5.57]
+
+*0.1
+[3.23, 6.97]
+
+*0.01
+[2.27, 5.65]
+
+*0.001
+[2.19, 5.53]
+
+*0.0001
+[2.21, 5.53]
+
+RBM -> MSR, only labeled data in RBM, then tune unlabeled data contribution in MSR
+
+*0.0001
+[2.11, 5.63]
+
+*0.001
+[2.09, 5.61]
+
+*0.01
+[2.19, 5.74]
+
+*0.1
+[3.16, 6.98]
+
+*0
+[2.29, 5.55]
+
+RBM -> MSR, only labeled data in RBM, but when compute gradient with unlabeled data, use corresponding labeled data's labels, then tune unlabeled data contribution in MSR
+
+*0.1
+[100+, 100+] (error increasing)
+
+*0.001
+[2.13, 5.66]
+
+RBM -> MSR, only labeled data in RBM, then tune regression tolerance and unlabeled data in MSR
+epsilonr = 0.1, unlabeled *0: [2.31, 5.57]
+epsilonr = 1, unlabeled *0: [2.12, 5.53]
+epsilonr = 0.1, unlabeled *0.01: [2.19, 5.74]
+epsilonr = 1, unlabeled *0.01: [2.18, 5.59]
+epsilonr = 3, unlabeled *0: [2.60, 5.60]
+
+RBM -> MSR, labeled + unlabeled (tune unlabeled portion)
+epsilonr = 1, MSR unlabeled *0.01, RBM unlabeled *0.01: [2.16, 5.58]
+epsilonr = 1, MSR unlabeled *0.1, RBM unlabeled *0.01: [3.19, 7.02]
+epsilonr = 1, MSR unlabeled *0.01, RBM unlabeled *0.1: [2.15, 5.63]
+epsilonr = 1, MSR unlabeled *0.01, RBM unlabeled *1: [2.04, 7.22]
+
+------------------------
+fix the RBM unlabeled weight
+epsilonr = 1, MSR unlabeled *0.01, RBM unlabeled *0.1: [2.12, 5.59]
+epsilonr = 1, MSR unlabeled *0.01, RBM unlabeled *0.01: [2.14, 5.55]
+
+------------------------
+RBM + MSR
+epsilonr = 1, weight_label = 1, weight_unlabel = 0.01, weight_unlabel_rbm = 0.01: [2.13, 5.63]
+epsilonr = 1, weight_label = 1, weight_unlabel = 0.01, weight_unlabel_rbm = 0.1: [2.13, 5.62]
+epsilonr = 1, weight_label = 1, weight_unlabel = 0.01, weight_unlabel_rbm = 1: []
+

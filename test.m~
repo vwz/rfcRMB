@@ -1,0 +1,8 @@
+
+ [acc1, acc2] = run_rfcRBM_lambda2_1();
+ [acc1, acc2] = run_rfcRBM_lambda2_10();
+
+ [acc1, acc2] = run_rfcRBM_momentum_02(); 
+ [acc1, acc2] = run_rfcRBM_momentum_05();
+
+ [acc1, acc2] = run_rfcRBM();

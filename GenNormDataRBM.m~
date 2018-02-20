@@ -1,0 +1,47 @@
+function GenNormDataRBM
+
+load Data_all_device.mat;
+
+
+xmean = mean(X1trn,1);
+
+NX1trn = getnorm(X1trn, xmean);
+NX1tst = getnorm(X1tst, xmean);
+NX2trn = getnorm(X2trn, xmean);
+NX2tst = getnorm(X2tst, xmean);
+
+[B1trn, C1trn] = GenDBNfeatures(NX1trn, P1trn);
+[B2trn, C2trn] = GenDBNfeatures(NX2trn, P2trn);
+save('norm_rbmdata'); %only mean
+
+end
+
+function [B,C] = GenDBNfeatures(X, P)
+
+numbatches = 10;
+numtotal = size(X,1);
+rindex = randperm(numtotal);
+numeach = floor(numtotal / numbatches);
+B = [];
+C = [];
+for i=1:10
+  startId = 1 + (i-1) * numeach;
+  endId = i * numeach;
+  B(:,:,i) = X(startId:endId, :);
+  C(:,:,i) = P(startId:endId, :);
+end
+
+end
+
+function [NX] = getnorm(X, xmean)
+
+NX = X - repmat(xmean, size(X,1), 1);
+
+end
+
+function [NX] = getmaxnorm(X, xmean, xmax)
+
+X = X / xmax;
+NX = X - repmat(xmean, size(X,1), 1);
+
+end

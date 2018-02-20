@@ -1,0 +1,58 @@
+function [regressV, regressE, vishid, hidbias] = RBMnMSRtraining(batchdata, batchdata_aux, batchlabel, batchcor, xychoice, maxepoch, maxepoch_rbm, maxepoch_msr)
+
+% This program trains the RBM-MSR. 
+% The program assumes that the following variables are set externally:
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases 2 numbatches), and each label is a 2-d coordindate
+% batchcor   -- correlation between unlabeled data and labeled data (numcases 3*K numbatches), i.e., each unlabeled instance has [<batchId, insId, corr>_1, ..., <batchId, insId, corr>_K] 
+% xychoice   -- either 1 or 2, indicating which cooridnate to use in batchlabel
+% maxepoch   -- the maximum iterations to do training
+% maxepoch_rbm   -- the maximum iterations to do training with rbm
+% maxepoch_msr   -- the maximum iterations to do training with msr
+
+restart = 1;
+topK = 2;
+numhid = 100;
+
+% data
+[numcases numdims numbatches]=size(batchdata);
+[numcases_aux numdims_aux numbatches_aux]=size(batchdata_aux);
+
+% initialize with single-device rbm
+%[vishid, visbias, hidbias, batchposhidprobs, poshidstates] = rbm_layer1_sparse(batchdata, numhid, maxepoch_rbm, restart);
+%batchposhidprobs_aux = zeros(numcases_aux,numhid,numbatches_aux);
+%for batch=1:numbatches_aux
+%    data = batchdata_aux(:,:,batch);
+%    poshidprobs_aux = rbm_layer_feature(data, vishid, hidbias);
+%    batchposhidprobs_aux(:,:,batch) = poshidprobs_aux;
+%end
+%% first RBM then MSR for initialization
+[vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rbm_part_testsemisupervision_2(batchdata, batchlabel, batchdata_aux, batchcor, numhid, maxepoch_rbm);
+
+% do msr, with some rbm presentation
+[regressV, regressE] = msr_part(batchlabel, batchcor, vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux, maxepoch_msr, xychoice);
+
+% do training iterations
+for epoch = 1:maxepoch
+    fprintf(1,'training epoch %d\r',epoch);
+    
+    % do rbm, with msr regression function
+    [vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rbm_part(batchdata, batchlabel, batchdata_aux, batchcor, numhid, maxepoch_rbm, regressV, regressE, xychoice);
+
+    % do msr, with some rbm presentation
+    [regressV, regressE] = msr_part(batchlabel, batchcor, vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux, maxepoch_msr, xychoice);
+end
+
+end
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+
+function [pred] = Predict(poshidprobs, regressV, regressE)
+    pred = regressV * poshidprobs' + regressE;
+end

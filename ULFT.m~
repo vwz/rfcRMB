@@ -1,0 +1,202 @@
+function [errdistA, errdistB] = ULFT(X1trn, Y1trn, P1trn, X2trn, X1tst, P1tst, X2tst, P2tst)
+%% This code is implemented for:
+%%   "Unsuprevised learning for solving RSS hardware variance problem in WiFi localization", Tsui et al., Mobile Network Application, 2009.
+%%
+%% input: X1trn = ncases_trn1 * ndim, Y1trn = ncases_trn1 * 1, P1trn = ncases_trn1 * 2, X2trn = ncases_trn2 * ndim
+%% 	  X1tst = ncases_tst1 * ndim, P1tst = ncases_tst1 * 2
+%% 	  X2tst = ncases_tst2 * ndim, P2tst = ncases_tst2 * 2
+%%
+%% Localization based on Gaussian model (the paper uses particle filter; since we do not consider sequence, we only use Gaussian model):
+%%   P(s|l) = P(s_1|l)...P(s_d|l)
+%%   where P(s_i|l) = 1/[sqrt(2*pi)*sigma_i] exp{-(x-mu_i)^2 / [2*sigma_i^2]} 
+%%   log P(s|l) = sum_i log P(s_i|l) = sum_i [-(s_i-mu_i)^2 - log sqrt(2*pi)*sigma_i]
+%% 
+%% EM algorithm: 
+%%   E-step: sum_j log [sum_l P(s^(j)|l)P(l)] 
+%%		>= sum_j sum_l log P(s^(j)|l)P(l) 
+%%		= sum_j (1/n) sum_l log P(s^(j)|l) 
+%%		= sum_j (1/n) sum_l sum_i [-(s^(j)_i-mu_{i,l})^2 - log sqrt(2*pi)*sigma_{i,l}]
+%%		= sum_j (1/n) sum_l sum_i [-(a_i*x^(j)_i+b_i-mu_{i,l})^2 - log sqrt(2*pi)*sigma_{i,l}]
+%%   M-step: let Loss = sum_j (1/n) sum_l sum_i [-(a_i*x^(j)_i+b_i-mu_{i,l})^2 - log sqrt(2*pi)*sigma_{i,l}] 
+%%		partial Loss / partial a_i
+%%		= sum_j (1/n) sum_l [-2*(a_i*x^(j)_i+b_i-mu_{i,l})*x_i] = 0
+%%		--> a_i = sum_j sum_l x^(j)_i*(mu_{i,l}-b_i) / sum_j sum_l [x_i^(j)*x_i^(j)];
+%%		partial Loss / partial b_i
+%%		= sum_j (1/n) sum_l [-2*(a_i*x^(j)_i+b_i-mu_{i,l})] = 0
+%%		--> b_i = sum_j sum_l (mu_{i,l}-a_i*x^(j)_i) / sum_j sum_l 1.
+%% The whole algorithm is:
+%%   given surveyor device data S = [s^(1), s^(2), ...] and user device data X = [x^(1), x^(2), ...]
+%%   step 1: for each location l, fit Gaussian distribution for each AP, i.e. [mu_{i,l}, sigma_{i,l}];
+%%   step 2: for each x^(j), find the closet s^(k) based on Pearson correlation;
+%%   step 3: use all the {x^(j), s^(k)} pairs to fit ax^(j) + b = s^(k);
+%%   step 4: start EM algorithm -- iteratively updating a and b.
+
+% do training and get Gaussian model
+[a, b, mu, sigma] = ULFTtrain(X1trn, Y1trn, X2trn);
+
+% do testing for device 1
+S = X1tst;
+ncases = size(S,1);
+P1pred = [];
+for i=1:ncases
+    s = S(i,:);
+    [location] = Predict(s, mu, sigma);
+    index = find(Y1trn==location);
+    P1pred = [P1pred; P1trn(index(1),:)];
+end
+
+temp = sum((P1pred-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+% do testing for device 2
+S = GetTransformedFeature(X2tst, a, b);
+ncases = size(S,1);
+P2pred = [];
+for i=1:ncases
+    s = S(i,:);
+    [location] = Predict(s, mu, sigma);
+    index = find(Y1trn==location);
+    P2pred = [P2pred; P1trn(index(1),:)];
+end
+
+temp = sum((P2pred-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+end
+
+%%%%%%
+function [mu, sigma] = Step1FitGaussian(S, Z)
+% input: S = ncases * ndim, Z = ncases * 1, from surveyor device
+% output: mu = nlocations * ndim, sigma = nlocations * ndim
+
+ndim = size(S,2);
+locations = unique(Z);
+nlocations = length(locations);
+
+mu = zeros(nlocations, ndim);
+sigma = zeros(nlocations, ndim);
+
+for i=1:nlocations
+    index = find(Z == locations(i));
+    data = S(index,:);
+    [muvec, sigmavec] = normfit(data);
+    mu(i,:) = muvec;
+    sigma(i,:) = sigmavec + 0.01;
+end
+
+end
+
+%%%%%%
+function [T] = Step2FindSingalMapping(S, X)
+% input: S = ncases_surveyor * ndim, from surveyor device
+%         X = ncases_user * ndim, from user device
+% output: T = ncases_user * ndim, from surveyor device
+
+ncases = size(X,1);
+T = [];
+for i=1:ncases
+    rho = corr(X(i,:)', S', 'type', 'Pearson');
+    [sortvals, sortind] = sort(rho, 'descend');
+    T = [T; S(sortind(1), :)];
+end
+
+end
+
+%%%%%%
+function [a, b] = Step3FitTranformation(X, T)
+% input: X = ncases_user * ndim, from user device
+%         T = ncases_user * ndim, from survey device
+% output: a(i) = dimension i's a-coefficient, b(i) = dimension i's b-coefficient
+
+a = [];
+b = [];
+ndim = size(X,2);
+for i=1:ndim
+    p = polyfit(X(:,i), T(:,i),1);
+    a = [a; p(1)];
+    b = [b; p(2)];
+end
+
+end
+
+%%%%%%
+function [a, b] = Step4EM(a, b, X, mu, sigma)
+% input: X = ncases_user * ndim, from user device
+%         a = ndim * 1, b = ndim * 1
+%	  mu = nlocations * ndim, sigma = nlocations * ndim
+% output: a(i) = dimension i's a-coefficient, b(i) = dimension i's b-coefficient
+%%   M-step: let Loss = sum_j (1/n) sum_l sum_i [-(a_i*x^(j)_i+b_i-mu_{i,l})^2 - log sqrt(2*pi)*sigma_{i,l}] 
+%%		partial Loss / partial a_i
+%%		= sum_j (1/n) sum_l [-2*(a_i*x^(j)_i+b_i-mu_{i,l})*x_i] = 0
+%%		--> a_i = sum_j sum_l x^(j)_i*(mu_{i,l}-b_i) / sum_j sum_l [x_i^(j)*x_i^(j)];
+%%		partial Loss / partial b_i
+%%		= sum_j (1/n) sum_l [-2*(a_i*x^(j)_i+b_i-mu_{i,l})] = 0
+%%		--> b_i = sum_j sum_l (mu_{i,l}-a_i*x^(j)_i) / sum_j sum_l 1.
+
+[nlocations, ndim] = size(mu);
+ncases = size(X,1);
+for iter=1:1
+    for i=1:ndim
+	nominator = 0;
+	denominator = 0;
+	for l=1:nlocations
+	    nominator = nominator + sum(X(:,i) * (mu(l,i) - b(i)));
+	    denominator = denominator + sum(X(:,i).^2);
+	end
+	a(i) = nominator / denominator;
+    end
+    for i=1:ndim
+	nominator = 0;
+	denominator = 0;
+	for l=1:nlocations
+	    nominator = nominator + sum(mu(l,i) - a(i) * X(:,i));
+	    denominator = denominator + ncases;
+	end
+	b(i) = nominator / denominator;
+    end
+end
+
+end
+
+%%%%%%
+function [a, b, mu, sigma] = ULFTtrain(X1trn, Y1trn, X2trn)
+% input: X = ncases * ndim, Y = ncases * 1
+
+[mu, sigma] = Step1FitGaussian(X1trn, Y1trn);
+[T] = Step2FindSingalMapping(X1trn, X2trn);
+[a, b] = Step3FitTranformation(X2trn, T);
+[a, b] = Step4EM(a, b, X2trn, mu, sigma);
+
+end
+
+%%%%%%
+function [S] = GetTransformedFeature(X, a, b)
+
+[ncases, ndim] = size(X);
+S = zeros(ncases, ndim);
+for i=1:ndim
+    S(:,i) = a(i) * X(:,i) + b(i);
+end
+
+end
+
+%%%%%%
+function [location] = Predict(s, mu, sigma) 
+% input: s = 1 * ndim, mu = nlocations * ndim, sigma = nlocations * ndim
+% l* = argmax sum_i [-(s_i-mu_{i,l})^2 - log sqrt(2*pi)*sigma_{i,l}]
+
+[nlocations, ndim] = size(mu);
+p = zeros(nlocations,1);
+for i=1:nlocations
+    muvec = mu(i,:);
+    sigmavec = sigma(i,:);
+    for j=1:ndim
+	pj = - (s(j) - muvec(j))^2 - log(sqrt(2 * 3.14) * sigmavec(j));
+	p(i) = p(i) + pj;
+    end
+end
+
+[maxp, location] = max(p);
+
+end
+

@@ -1,0 +1,69 @@
+function [v, e, vishid, hidbias] = rfcRBM_train_test(batchdata, batchdata_aux, batchlabel, maxepoch, maxepoch_rbm, numhid)
+
+% This program trains the rfcRBM. 
+% The program assumes that the following variables are set externally:
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases numbatches), and each label is a location class index
+% maxepoch   -- the maximum iterations to do training
+% maxepoch_rbm   -- the maximum iterations to do training with rbm
+
+
+restart = 1;
+
+% data
+[numcases numdims numbatches]=size(batchdata);
+[numcases_aux numdims_aux numbatches_aux]=size(batchdata_aux);
+
+% first train a pairwise feature regularized RBM for initialization
+[rbm_obj, vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbminit(batchdata, batchdata_aux, numhid, maxepoch_rbm);
+
+% do TSVM, with initilized RBM presentation
+[tsvm_obj, v, e, xi, xi_aux, tsvm_labels, tsvm_labels_aux] = rfcRBM_tsvmtrain(batchlabel, batchposhidprobs, batchposhidprobs_aux);
+
+% output the overall objective function
+rbm_obj = rbm_obj + 10E5;
+obj = rbm_obj + tsvm_obj;
+fprintf(1, 'init: %4i objective = %f \n', 0, obj);
+
+% do training iterations
+for epoch = 1:maxepoch
+    fprintf(1,'training epoch %d\n',epoch);
+    
+    % do regularized RBM, with tsvm output
+    [rbm_obj2, vishid2, visbias2, hidbias2, batchposhidprobs2, batchposhidprobs_aux2] = rfcRBM_rbmtrain(batchdata, batchdata_aux, numhid, maxepoch_rbm, vishid, visbias, hidbias, v, e, xi, xi_aux, tsvm_labels, tsvm_labels_aux);
+
+    % check convergence
+    if rbm_obj2 > rbm_obj
+	fprintf(1,'rbm obj not decreasing, stop at training epoch %d\n',epoch);
+	break;
+    end
+    rbm_obj = rbm_obj2;
+    vishid = vishid2; 
+    visbias = visbias2; 
+    hidbias = hidbias2; 
+    batchposhidprobs = batchposhidprobs2; 
+    batchposhidprobs_aux = batchposhidprobs_aux2;
+
+    % do tsvm, with regularized RBM output
+    [tsvm_obj2, v2, e2, xi2, xi_aux2, tsvm_labels2, tsvm_labels_aux2] = rfcRBM_tsvmtrain(batchlabel, batchposhidprobs, batchposhidprobs_aux);
+
+    % check convergence
+    if tsvm_obj2 > tsvm_obj
+	fprintf(1,'tsvm obj not decreasing, stop at training epoch %d\n',epoch);
+	break;
+    end
+    tsvm_obj = tsvm_obj2;
+    v = v2;
+    e = e2;
+    xi = xi2;
+    xi_aux = xi_aux2;
+    tsvm_labels = tsvm_labels2;
+    tsvm_labels_aux = tsvm_labels_aux2;
+
+    % output the overall objective function
+    obj = rbm_obj + tsvm_obj;
+    fprintf(1, 'epoch: %4i objective = %f \n', epoch, obj);
+end
+
+end

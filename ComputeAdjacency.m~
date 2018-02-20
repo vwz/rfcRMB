@@ -1,0 +1,19 @@
+function [batchtau] = ComputeAdjacency(batchdata, params) 
+
+% This program computes the adjacency matrix for each batch of batchdata.
+% The program assumes that the following variables are set externally:% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+%
+% The program outputs the following variables:
+% batchtau   -- the adjacency matrix based on batchdata, it is a sparse matrix on numcases*numcases*numbatches
+
+options = make_options('NN', params.NN);
+
+[numcases, numhid, numbatches] = size(batchdata);
+batchtau = [];
+for batch=1:numbatches
+    X = batchdata(:,:,batch);
+    W = adjacency(options, X);
+    batchtau{batch} = W;
+end
+
+end

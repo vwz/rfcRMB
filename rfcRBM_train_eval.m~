@@ -1,0 +1,162 @@
+function [Theta, F] = rfcRBM_train_eval(batchdata, batchdata_aux, batchlabel, params, NX1tst, NX2tst, Y1tst, Y2tst, location)
+
+% This program trains the rfcRBM. 
+%
+% The program assumes that the following variables are set externally:
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases numbatches), and each label is a location class index
+
+maxepoch = params.maxepoch;
+
+% data
+Y1trn = reshape(batchlabel, [size(batchlabel,1)*size(batchlabel,2), 1]);
+
+% first train a pairwise feature regularized RBM for initialization
+%[Theta, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbminit(batchdata, batchdata_aux, params);
+%save('rbm_init_3000.mat', 'Theta', 'batchposhidprobs', 'batchposhidprobs_aux');
+load('rbm_init_3000.mat');
+%Theta = struct('vishid', vishid, ...
+%               'visbias', visbias, ...
+%               'hidbias', hidbias);
+
+% compute the adjacency matrix according to the initialized RBM feature
+[batchtau] = ComputeAdjacency(batchposhidprobs, params);
+[batchtau_aux] = ComputeAdjacency(batchposhidprobs_aux, params);
+
+% do LapSVM, with initilized RBM presentation
+X1trn = Tensor2Matrix(batchposhidprobs);
+X2trn = Tensor2Matrix(batchposhidprobs_aux);
+fprintf(1,'LapSVM starts at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+tic;
+[F] = rfcRBM_LapSVMtrain_sample(X1trn, X2trn, Y1trn, params);
+%[F] = rfcRBM_LapSVMtrain(X1trn, X2trn, Y1trn, params);
+%save('F_init.mat', 'F', '-v7.3');
+%load('F_init.mat');
+sec = toc;
+fprintf(1,'LapSVM ends at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+fprintf(1,'LapSVM training took: %f h\n', sec);
+
+% do testing
+[Pred1] = rfcRBM_test(NX1tst, Theta, F);
+[Pred2] = rfcRBM_test(NX2tst, Theta, F);
+
+% evaluate error
+acc1 = [];
+acc2 = [];for errdist=1:1:10
+    acc1 = [acc1; ComputeAccurary(Pred1, Y1tst, location, errdist)];
+    acc2 = [acc2; ComputeAccurary(Pred2, Y2tst, location, errdist)];
+end
+
+% keep a record of all the accuracies along the iterations
+acc1set{1} = acc1;
+acc2set{1} = acc2;
+
+% do training iterations
+for epoch = 1:maxepoch
+    fprintf(1,'training epoch %d\n',epoch);
+    
+    % do regularized RBM, with LapSVM output
+    fprintf(1,'RBM starts at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+    tic
+    [Theta, batchposhidprobs, batchposhidprobs_aux] = rfcRBM_rbmtrain(batchdata, batchdata_aux, batchlabel, batchtau, batchtau_aux, params, Theta, F);
+    sec = toc;
+    fprintf(1,'RBM ends at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+    fprintf(1,'RBM training took: %f s\n', sec);
+
+    % do LapSVM, with regularized RBM output
+    X1trn = Tensor2Matrix(batchposhidprobs);
+    X2trn = Tensor2Matrix(batchposhidprobs_aux); 
+    fprintf(1,'LapSVM starts at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+    tic
+    %[F] = rfcRBM_LapSVMtrain(X1trn, X2trn, Y1trn, params);
+    [F] = rfcRBM_LapSVMtrain_sample(X1trn, X2trn, Y1trn, params);
+    sec = toc;
+    fprintf(1,'LapSVM ends at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+    fprintf(1,'LapSVM training took: %f h\n', sec);
+
+    % do testing
+    [Pred1] = rfcRBM_test(NX1tst, Theta, F);
+    [Pred2] = rfcRBM_test(NX2tst, Theta, F);
+
+    % evaluate error
+    acc1 = [];
+    acc2 = [];    for errdist=1:1:10
+	acc1 = [acc1; ComputeAccurary(Pred1, Y1tst, location, errdist)];
+	acc2 = [acc2; ComputeAccurary(Pred2, Y2tst, location, errdist)];
+    end
+    
+    acc1set{epoch+1} = acc1;
+    acc2set{epoch+1} = acc2;
+end
+
+save('accset.mat', 'acc1set', 'acc2set');
+
+end
+
+
+function [batchtau] = ComputeAdjacency(batchdata, params) 
+
+% This program computes the adjacency matrix for each batch of batchdata.
+% The program assumes that the following variables are set externally:% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+%
+% The program outputs the following variables:
+% batchtau   -- the adjacency matrix based on batchdata, it is a numbatches*1 cell array, each cell is a sparse matrix on numcases*numcases
+
+[numcases, numhid, numbatches] = size(batchdata);
+batchtau = [];
+for batch=1:numbatches
+    X = batchdata(:,:,batch);
+    W = [];
+    if (size(X,1) > params.NN)
+	options = make_options('NN', params.NN);
+	W = adjacency(options, X);
+    end
+    batchtau{batch} = triu(W);  % only save the upper triangular part of the adjacency matrix
+end
+
+end
+
+function [m] = Tensor2Matrix(t)
+
+%% This program converts a tensor (ndim1, ndim2, ndim3) into a matrix (ndim1*ndim3, ndim2)
+%
+% The program assumes that the following variables are set externally:
+% t  -- the tensor, whose dimensions are (ndim1, ndim2, ndim3)
+%
+% The program outputs the following variables:
+% m  -- the matrix, whose dimensions are (ndim1*ndim3, ndim2)
+
+[ndim1, ndim2, ndim3] = size(t);
+m = [];
+for i = 1:ndim3
+    m = [m; t(:,:,i)];
+end
+
+end
+
+function [acc] = ComputeAccurary(pred, gnd, location, errdist)
+
+% This function computes the accuracy under some certain error distance.
+% It takes the following variable as input:
+% pred     -- the predictions in terms of location index, it is a numcases*1 vector
+% gnd      -- the ground truth in terms of location index, it is a numcases*1 vector
+% location -- the index-to-coordinate mapping system, it is a numloc*2 matrix, each row as the 2D coordinate of a location
+% errdist  -- the error distance threshold that is used to compute the prediction accuracy
+%
+% This function outputs the following variable:
+% acc  -- the accuracy under errdist
+
+ncorrect = 0;
+ntotal = 0;
+n = length(gnd);
+for i=1:n
+    gndtruth = location(gnd(i),:);
+    ntotal = ntotal + size(gndtruth,1);
+    predict = location(pred(i),:);
+    temp = sum((predict-gndtruth).^2,2);
+    ncorrect = ncorrect + length(find(temp<(errdist^2)));
+end
+acc = ncorrect/ntotal;
+
+end

@@ -1,0 +1,78 @@
+function [errdistA errdistB] = Test2ndOrder()
+
+% device A full, device B none, no MTL
+
+load Data_all_device.mat;
+addpath '../libsvm-3.18/matlab/';
+
+% ------ test device B ---------
+Z1trn = Gen2ndOrder(X1trn);
+disp('Z1trn ready');
+Z1tst = Gen2ndOrder(X1tst);
+disp('Z1tst ready');
+Z2tst = Gen2ndOrder(X2tst);
+disp('Z2tst ready');
+save('2nd-order.mat', Z1trn, Z1tst, Z2tst);
+
+% for x-coordinate
+X = X1trn;
+Y = P1trn(:,1);
+model = svmtrain(Y, Z1trn, '-s 3 -t 0');
+
+Y = P1tst(:,1);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z1tst, model);
+P1pre = tstYx;
+
+Y = P2tst(:,1);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z2tst, model);
+P2pre = tstYx;
+
+% for y-coordinate
+X = X1trn;
+Y = P1trn(:,2);
+model = svmtrain(Y, Z1trn, '-s 3 -t 0');
+
+Y = P1tst(:,2);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z1tst, model);
+P1pre = [P1pre tstYx];
+
+Y = P2tst(:,2);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z2tst, model);
+P2pre = [P2pre tstYx];
+
+% calculate error distance
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+end 
+
+function Z = Gen2ndOrder(X)
+
+Z = [];
+m = size(X,1);
+n = size(X,2);
+for i=1:m
+  zvector = [];
+  for j=1:n-1
+    for k=j+1:n
+      v = 0;
+      if X(i,j) >= X(i,k)
+        v = 1;
+      end
+      zvector = [zvector v];
+    end
+  end
+  Z = [Z; zvector];
+end
+
+size(Z)
+
+end
+

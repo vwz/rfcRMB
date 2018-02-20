@@ -1,0 +1,75 @@
+function [errdistA errdistB] = RBMnMSR(numhid)
+
+% RBM + Max-margin Semi-supervised Regression
+% device A full, device B unlabeled data
+
+load rmbmsrdata.mat; %mean
+addpath '../dbn/';
+
+maxepoch = 20;
+maxepoch_rbm = 20;
+maxepoch_msr = 200;
+restart = 1;
+topK = 5;
+%numhid = 100;
+
+% data
+% batchdata = B1trn, batchlabel = C1trn, batchdata_aux = B2trn
+
+% compute correlation 
+[batchcor] = GetCorrelation(B1trn, B2trn, topK);
+
+% do training for x-axis, i.e., xychoice = 1
+disp('training for x-axis');
+[regressV1, regressE1, vishid1, hidbias1] = RBMnMSRtraining(B1trn, B2trn, C1trn, batchcor, 1, maxepoch, maxepoch_rbm, maxepoch_msr);
+
+% do training for x-axis, i.e., xychoice = 2
+disp('training for y-axis');
+[regressV2, regressE2, vishid2, hidbias2] = RBMnMSRtraining(B1trn, B2trn, C1trn, batchcor, 2, maxepoch, maxepoch_rbm, maxepoch_msr);
+
+% do testing for x-axis
+[poshidprobs] = rbm_layer_feature(NX1tst, vishid1, hidbias1);
+P1pre1 = Predict(poshidprobs, regressV1, regressE1);
+
+[poshidprobs] = rbm_layer_feature(NX2tst, vishid1, hidbias1);
+P2pre1 = Predict(poshidprobs, regressV1, regressE1);
+
+% do testing for y-axis
+[poshidprobs] = rbm_layer_feature(NX1tst, vishid2, hidbias2);
+P1pre2 = Predict(poshidprobs, regressV2, regressE2);
+
+[poshidprobs] = rbm_layer_feature(NX2tst, vishid2, hidbias2);
+P2pre2 = Predict(poshidprobs, regressV2, regressE2);
+
+% evaluate error
+P1pre = [P1pre1 P1pre2];
+P2pre = [P2pre1 P2pre2];
+
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+for errdist=1:1:10
+    ncorrect = length(find(temp<(errdist^2)));
+    accuracy = ncorrect/length(temp);
+end
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+for errdist=1:1:10
+    ncorrect = length(find(temp<(errdist^2)));
+    accuracy = ncorrect/length(temp);
+end
+
+end 
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+
+function [pred] = Predict(poshidprobs, regressV, regressE)
+    pred = poshidprobs * regressV' + regressE;
+end

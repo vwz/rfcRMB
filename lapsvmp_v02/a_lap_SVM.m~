@@ -1,0 +1,84 @@
+function [classifier_all,unlabel_out,index_map]=a_lap_SVM(X1trn, X2trn, P1trn)
+
+setpaths
+
+locations = unique(P1trn, 'rows');
+
+[m,n]=size(locations);
+
+% generating default options
+options=make_options('gamma_I',1,'gamma_A',1e-5,'NN',6,'KernelParam',0.35,'Kernel','linear');
+options.Verbose=1;
+options.UseBias=1;
+options.UseHinge=1;
+options.LaplacianNormalize=0;
+options.NewtonLineSearch=0;
+
+
+
+
+s=2;
+mod_num=0;
+index_map=[];
+
+%% unalbeled data %%%%%
+for count=1:m
+    for count2=s:m   
+         
+        %% unlabeled data label
+        [row,column]=size(X2trn);
+        X2label=zeros(row,1);
+        
+        
+        %% set 1 location features label +1    
+        X1index=find(ismember(P1trn,locations(count,:),'rows'));
+        
+        X1trn1=X1trn(X1index,:);
+        
+        X1label(1:size(X1index,1))=1;
+        
+        
+         %% set 1 location features label -1  
+        X2index=find(ismember(P1trn,locations(count2,:),'rows'));
+        
+        X1trn2=X1trn(X2index,:);
+        
+        X1label(size(X1index,1)+1:size(X1index,1)+size(X2index,1))=-1;
+        
+        
+        %% combine training features and labels    
+        X=[X1trn1;X1trn2;X2trn];
+        
+        Y=[X1label';X2label];
+        
+        %% create index map to know the location index set to +1 and -1 in each model
+        
+        index_map=[index_map;count,count2];
+        
+        %% creating the 'data' structure
+        data.X=X;
+        data.Y=Y; 
+        
+        fprintf('Computing Gram matrix and Laplacian...\n\n');
+        data.K=calckernel('linear',options,X,X);
+        data.L=laplacian(options,X);
+
+        %% training the classifier
+        fprintf('Training LapSVM in the primal with Newton''s method...\n');
+        classifier=lapsvmp(options,data);
+
+        %% get the unlabeled data labels
+        fprintf('It took %f seconds.\n',classifier.traintime);
+        out=sign(data.K(:,classifier.svs)*classifier.alpha+classifier.b); 
+        
+        mod_num=mod_num+1;
+        unlabel_out{i}=out;
+        classifier_all{mod_num}=classifier;
+            
+    end
+    
+    s=s+1;
+end
+
+end
+

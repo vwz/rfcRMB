@@ -1,0 +1,26 @@
+function GenDataDBN
+
+load Data_all_device.mat;
+
+
+function B = GenDBNfeatures(X)
+
+numbatches = 10;
+numtotal = size(X1trn,1);
+rindex = randperm(numtotal);
+numeach = floor(numtotal / numbatches);
+batchdata = [];
+for i=1:10
+  startId = 1 + (i-1) * numeach;
+  endId = i * numeach;
+  if i==10
+    endId = numtotal;
+  end
+  batch = X(startId, endId);
+  batchdata(:,:,i) = batch; 
+end
+
+[numcases numdims numbatches] = size(batchdata);
+B = batchdata;
+
+end

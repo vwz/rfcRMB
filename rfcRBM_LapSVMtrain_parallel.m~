@@ -1,0 +1,106 @@
+function [F] = rfcRBM_LapSVMtrain_parallel(X1trn, X2trn, Y1trn, params)
+
+%% This program trains LapSVM of the following form:
+%%	min L2
+%% where 
+%% 	L2 = sum_m L2_m
+%%	L2_m = sum_k max{1 - z_k f(g(x^k)), 0} + gamma_A |f|_A^2 + gamma_I |f|_I^2
+%
+% The program assumes that the following variables are set externally:
+% X1trn  -- the labeled data, which is a numcases*numhids matrix
+% X2trn  -- the unlabeled data, which is a numcases_aux*numhids matrix
+% Y1trn  -- the labels for X1trn, which is a numcases*1 vector
+% params -- the parameter struct, defined in the main function
+% 
+%
+% The program outputs the following variables:
+% F      -- the parameters for LapSVM, where
+%    F.X_all            -- the training data, it is a model_num*1 cells, each cell is a numcases*numhids matrix
+%    F.classifier_all   -- the classifiers for each binary classfication task, it is a model_num*1 cells, each cell includes classifier.alpha and classifier.b
+%    F.v_all            -- the support vectors for each binary classfication task, it is a model_num*1 cells, each cell includes v
+%    F.indexmap         -- the mapping function between model number and the class pair, it is a model_num*2 matrix, each row (i,j) indicates that class i is +1 and class j is -1
+
+%setpaths
+locations = unique(Y1trn);
+m = length(locations);
+
+% generating default options
+%% Cg = 0: newton method for optimization in primal form
+%% Verbose = 0: do not output objective function value
+%% Can set 'NN', which by default NN=6
+%% Can use bias: 'UseBias'=1, 'LaplacianNormalize'=0
+options = make_options('gamma_I', params.gammaI, 'gamma_A', params.gammaA, 'NN', params.NN, 'Kernel', 'linear', 'Cg', 0, 'Verbose', 0);
+
+% do multi-class classification with a one-vs-one setting
+clear X_cell v_cell classifier_cell;
+%fprintf(1,'LapSVM starts at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+parfor i = 1:m
+    for j = 1:m   
+	if j > i
+	    fprintf('LapSVM iteration: %d-%d\r\r\r', i, j);
+            [X, classifier] = getClassifier(X1trn, X2trn, Y1trn, options, i, j);
+	    X_cell{i,j} = X;
+	    v_cell{i,j} = classifier.alpha' * X(classifier.svs, :); % 1*numhid vector
+	    classifier_cell{i,j} = classifier;
+	end
+    end
+end
+%fprintf(1,'LapSVM ends at: %s\n', datestr(now, 'dd-mm-yyyy HH:MM:SS'));
+
+% build index 
+clear X_all v_all classifier_all;
+index_map = [];
+model_num = 0;
+for i = 1:m
+    for j = i+1:m  
+	model_num = model_num + 1;
+	%X_all{model_num} = X_cell{i,j};
+	v_all{model_num} = v_cell{i,j};
+	classifier_all{model_num} = classifier_cell{i,j};
+	index_map = [index_map; i,j];
+    end
+end
+
+
+F = struct('X_all', X_all, ...
+           'classifier_all', classifier_all, ...
+           'v_all', v_all, ...
+           'index_map', index_map);
+
+end
+
+function [X, classifier] = getClassifier(X1trn, X2trn, Y1trn, options, i, j) 
+
+%% set unlabeled data's labels as zeros
+Y2label = zeros(size(X2trn,1),1);
+
+%% set class-i data's labels as +1
+index = find(Y1trn == i);
+X1trn1 = X1trn(index,:);
+Y1label = ones(length(index),1);
+
+%% set class-j data's labels as -1
+index = find(Y1trn == j);
+X1trn2 = X1trn(index,:);
+Y1label = [Y1label; -1 * ones(length(index),1)];
+
+%% combine training data and labels    
+X = [X1trn1; X1trn2; X2trn];
+Y = [Y1label; Y2label];
+
+%% creating the 'data' structure
+data.X = X;
+data.Y = Y; 
+
+%fprintf('Computing Gram matrix and Laplacian...\n');
+data.K = calckernel(options, X, X);
+data.L = laplacian(options, X);
+
+%% training the classifier
+%fprintf('Training LapSVM in the primal method...\n');
+classifier = lapsvmp(options, data);
+
+%% get the unlabeled data labels
+%fprintf('It took %f seconds.\n', classifier.traintime);
+
+end

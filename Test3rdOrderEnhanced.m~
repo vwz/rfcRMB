@@ -1,0 +1,84 @@
+function [errdistA errdistB] = Test3rdOrderEnhanced()
+
+% device A full, device B none, no MTL
+
+load Data_all_device.mat;
+addpath '../libsvm-3.18/matlab/';
+
+D2nd = load('2nd-order.mat');
+
+% ------ test device B ---------
+Z1trn = Gen3rdOrder(X1trn);
+disp('Z1trn ready');
+Z1tst = Gen3rdOrder(X1tst);
+disp('Z1tst ready');
+Z2tst = Gen3rdOrder(X2tst);
+disp('Z2tst ready');
+save('3rd-order.mat', 'Z1trn', 'Z1tst', 'Z2tst', '-v7.3');
+
+% for x-coordinate
+X = X1trn;
+Y = P1trn(:,1);
+model = svmtrain(Y, [Z1trn D2nd.Z1trn], '-s 3 -t 0');
+
+Y = P1tst(:,1);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, [Z1tst D2nd.Z1tst], model);
+P1pre = tstYx;
+
+Y = P2tst(:,1);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, [Z2tst D2nd.Z2tst], model);
+P2pre = tstYx;
+
+% for y-coordinate
+X = X1trn;
+Y = P1trn(:,2);
+model = svmtrain(Y, [Z1trn D2nd.Z1trn], '-s 3 -t 0');
+
+Y = P1tst(:,2);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, [Z1tst D2nd.Z1tst], model);
+P1pre = [P1pre tstYx];
+
+Y = P2tst(:,2);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, [Z2tst D2nd.Z2tst], model);
+P2pre = [P2pre tstYx];
+
+% calculate error distance
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+end 
+
+function Z = Gen3rdOrder(X)
+
+Z = [];
+m = size(X,1);
+n = size(X,2);
+for i=1:m
+  zvector = [];
+  for j=1:n-2
+    for k=j+1:n-1
+      for l=k+1:n
+        v = 0;
+        if (X(i,j) - X(i,k)) >= (X(i,k) - X(i,l))
+          v = 1;
+        end
+        zvector = [zvector v];
+      end
+    end
+  end
+  Z = [Z; zvector];
+end
+
+size(Z)
+
+Z = sparse(Z);
+
+end
+

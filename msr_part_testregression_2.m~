@@ -1,0 +1,132 @@
+function [regressV, regressE] = msr_part(batchlabel, batchcor, vishid, visbiases, hidbiases, batchposhidprobs, batchposhidprobs_aux, maxepoch, xychoice)
+% This program trains Max-margin Semi-supervised Regression (MSR) model of the following form:
+%	weight_label * L2 + weight_unlabel * R3
+% where
+% 	L2 = |v|^2 + 1/l sum_k=1^l H(f, gx_k, y_k),
+% with H is hinge loss with H(f, gx, y) = max{|f(gx)-y| - epsilon, 0}.
+% 	R3 = 1/|E|^2 sum_{k1,k2} c_{k1,k2} [f(gx_k1) - f(gx_k2)]^2,
+% with c is correlation between x_k1 and x_k2.
+%
+% The program assumes that the following variables are set externally:
+% maxepoch   -- maximum number of epochs
+% numhid     -- number of hidden units% batchlabel -- the labels that are divided into batches (numcases 2 numbatches), and each label is a 2-d coordindate
+% batchcor   -- correlation between unlabeled data and labeled data (numcases 3*K numbatches), i.e., each unlabeled instance has [<batchId, insId, corr>_1, ..., <batchId, insId, corr>_K] 
+% restart    -- set to 1 if learning starts from beginning
+% batchposhidprobs -- the RBM output (probability that each hid as 1) for labeled data (numcases numhid numbatches)
+% batchposhidprobs_aux -- the RBM output (probability that each hid as 1) for unlabeled data (numcases_aux numhid numbatches_aux)
+% xychoice   -- either 1 or 2, indicating which cooridnate to use in batchlabel
+
+epsilonr       = 0.1;	 % hinge loss epsilon 
+epsilonv       = 0.05; % Learning rate for weights
+epsilone       = 0.05; % Learning rate for bias
+weight_margin  = 0.001; % trade-off parameter for regression weight regularization
+weight_label   = 1; % trade-off parameter for unlabeled data
+weight_unlabel = 0; % trade-off parameter for unlabeled data
+[numcases numhid numbatches]=size(batchposhidprobs);
+[numcases_aux numhid numbatches_aux]=size(batchposhidprobs_aux);
+K = size(batchcor,2) / 3; % each correlation pair w.r.t. an unlabeled instance is a 3-d turple, locating the corresponding labeled instance's batchId, insId and correlation value
+
+% Initializing symmetric weights and biases.
+regressV = zeros(1,numhid);
+regressE = 0;
+
+for epoch = 1:maxepoch,
+    fprintf(1,'epoch %d\r',epoch);
+    errsum=0;
+
+    %% This is for the labeled data
+    for batch = 1:numbatches,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+        
+	batchgradL2v = zeros(1,numhid);
+	batchgradR3v = zeros(1,numhid);
+	batchgradL2e = 0;
+
+        %%%%%%%%% INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidprobs = batchposhidprobs(:,:,batch);
+	label = batchlabel(:,xychoice,batch);
+	
+	%%%%%%%%% GRADIENT OF HINGE LOSS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	for i=1:numcases
+	    gx = poshidprobs(i,:);
+	    y  = label(i);
+	    delta = CheckHingeLoss(gx, y, regressV, regressE, epsilonr);
+	    batchgradL2v = batchgradL2v + gx*delta;
+	    batchgradL2e = batchgradL2e + delta;
+	end
+	err = weight_label * (weight_margin*norm(regressV)^2 + ComputeError(poshidprobs, label, regressV, regressE, epsilonr));
+	errsum = errsum + err;
+
+	%%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        regressV = regressV + epsilonv * weight_label * ( - weight_margin*2*regressV - batchgradL2v/numcases );
+	regressE = regressE + epsilone * weight_label * ( - batchgradL2e/numcases );
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    end
+
+    %% This is for the unlabeled data
+    for batch = 1:numbatches_aux,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+	
+	batchgradL2v = zeros(1,numhid);
+	batchgradR3v = zeros(1,numhid);
+	batchgradL2e = 0;
+        
+        %%%%%%%%% INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidprobs_aux = batchposhidprobs_aux(:,:,batch);
+        
+        %%%%%%%%% GRADIENT OF LAPLACIAN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	err = 0;
+	cor = batchcor(:,:,batch);
+	numedges2 = (numcases_aux * K)^2;
+	for i=1:numcases_aux
+	    gx_k1 = batchposhidprobs_aux(i,:,batch);
+	    fg_k1 = Regression(gx_k1, regressV, regressE);
+	    for j=1:K
+		batchInd = cor(i,(j-1)*3 + 1);
+		insInd = cor(i,(j-1)*3 + 2);
+		c_k1k2 = cor(i,(j-1)*3 + 3);
+		gx_k2 = batchposhidprobs(insInd,:,batchInd);
+		fg_k2 = Regression(gx_k2, regressV, regressE);
+		batchgradR3v = batchgradR3v + c_k1k2 * (fg_k1 - fg_k2) * (gx_k1 - gx_k2) * 2;
+		err = err + c_k1k2 * (fg_k1 - fg_k2)^2;
+	    end
+	end
+	errsum = errsum + weight_unlabel*err/numedges2;
+        
+        %%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        regressV = regressV + epsilonv * weight_unlabel * ( - batchgradR3v/numedges2 );
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    end
+
+    total_error(epoch) = errsum; 
+    fprintf(1, 'msr epoch %4i error %f \n', epoch, errsum);
+end 
+
+end
+
+function err = ComputeError(poshidprobs, label, regressV, regressE, epsilonr)
+    pred = poshidprobs * regressV' + regressE;
+    tmp = max(abs(pred - label) - epsilonr, 0);
+    err = mean(tmp);
+end
+
+function value = CheckHingeLoss(gx, y, regressV, regressE, epsilonr) 
+    value = 0;
+    f = Regression(gx, regressV, regressE);
+    if abs(f - y) >= epsilonr
+	if f >= y
+	    value = 1;
+	else
+	    value = -1;
+	end
+    else
+	value = 0;
+    end
+end
+
+function value = Regression(gx, regressV, regressE)
+   value = regressV * gx' + regressE;
+end

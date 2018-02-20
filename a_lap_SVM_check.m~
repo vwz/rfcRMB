@@ -1,0 +1,70 @@
+function [acc2]=a_lap_SVM_check(X2tst, Y2tst, mod_num, index_map, classifier_all, X1trn_all, locations)
+
+[m,n]=size(locations);
+
+
+predictions_all=[];
+indexes=[];
+[row,col]=size(X2tst);
+
+% generating default options
+options=make_options('gamma_I',1,'gamma_A',1e-5,'Kernel','linear');
+options.Verbose=1;
+options.UseBias=1;
+options.UseHinge=1;
+options.LaplacianNormalize=0;
+options.NewtonLineSearch=0;
+options.Kernel='linear';
+
+    
+    for count=1:mod_num
+        
+        fprintf('Computing Gram matrix and Laplacian...\n');
+        data.K=calckernel(options, X1trn_all{count}, X2tst);        
+        fprintf('Predicting...\n');
+        pred= sign(data.K(:,classifier_all{count}.svs)*classifier_all{count}.alpha+classifier_all{count}.b); 
+        
+        
+        pred(pred==1)=index_map(count,1);
+        pred(pred==-1)=index_map(count,2);
+        
+        predictions_all(:,count)=pred;
+        
+    end
+    
+    pred2=mode(predictions_all,2);
+
+
+% evaluate error
+acc2 = [];for errdist=1:1:10
+    acc2 = [acc2; ComputeAccurary(pred2, Y2tst, locations, errdist)];
+end
+
+disp(acc2);
+
+end 
+
+
+function [accuracy] = ComputeAccurary(pred, gnd, location, errdist)
+
+% This function computes the accuracy under some certain error distance.
+% It takes the following variable as input:
+% pred     -- the predictions in terms of location index, it is a numcases*1 vector
+% gnd      -- the ground truth in terms of location index, it is a numcases*1 vector
+% location -- the index-to-coordinate mapping system, it is a numloc*2 matrix, each row as the 2D coordinate of a location
+% errdist  -- the error distance threshold that is used to compute the prediction accuracy
+%
+% This function outputs the following variable:
+% acc  -- the accuracy under errdist
+
+gndtruth = location(gnd,:);
+ntotal = length(gndtruth);
+predict = location(pred,:);
+temp = sum((predict-gndtruth).^2,2);
+err = sqrt(mean(temp));
+disp('distance = ');
+disp(err);
+ncorrect = length(find(temp<(errdist^2)));
+accuracy = ncorrect/ntotal;
+
+end

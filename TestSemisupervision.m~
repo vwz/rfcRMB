@@ -1,0 +1,73 @@
+function [errdistA errdistB] = TestSemisupervision(numhid1)
+
+% device A full, device B none, no MTL
+%load dbnbatchdata_mean.mat; %mean
+load rmbmsrdata.mat;
+addpath '../libsvm-3.18/matlab/';
+addpath '../dbn/';
+
+maxepoch = 20;
+restart = 1;
+maxepoch_msr = 200;
+topK = 5;
+
+% compute correlation 
+[batchcor] = GetCorrelation(B1trn, B2trn, topK);
+
+%% combine both devices' training unlabeled data for rbm
+%[vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1] = rbm_part_testsemisupervision(B1trn, C1trn, B2trn, batchcor, numhid1, maxepoch);
+%% using only source device's training unlabeled data for rbm
+[vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1] = rbm_part_testsemisupervision_2(B1trn, C1trn, B2trn, batchcor, numhid1, maxepoch);
+
+%[vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1] = rbm_part_testsemisupervision_3(B1trn, C1trn, B2trn, batchcor, numhid1, maxepoch);
+%[vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1] = rbm_part_testsemisupervision_4(B1trn, C1trn, B2trn, batchcor, numhid1, maxepoch);
+
+%fname = sprintf('rbm-%d.mat', numhid1);
+%save(fname, 'vishid1', 'visbias1', 'hidbias1');
+
+Z1tst = rbm_layer_feature(NX1tst, vishid1, visbias1, hidbias1);
+Z2tst = rbm_layer_feature(NX2tst, vishid1, visbias1, hidbias1);
+
+[errdistA, errdistB] = msr(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, Z1tst, Z2tst, P1tst, P2tst);
+
+end 
+
+function [errdistA, errdistB] = msr(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, Z1tst, Z2tst, P1tst, P2tst)
+
+% for x-coordinate
+xychoice = 1;
+[regressV, regressE] = msr_part_testsemisupervision(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, xychoice);
+%[regressV, regressE] = msr_part_testsemisupervision2(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, xychoice);
+
+tstYx = Z1tst * regressV' + regressE;
+P1pre = tstYx;
+
+tstYx = Z2tst * regressV' + regressE;
+P2pre = tstYx;
+
+% for y-coordinate
+xychoice = 2;
+[regressV, regressE] = msr_part_testsemisupervision(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, xychoice);
+%[regressV, regressE] = msr_part_testsemisupervision2(C1trn, batchcor, vishid1, visbias1, hidbias1, batchposhidprobs1, batchposhidprobs_aux1, maxepoch_msr, xychoice);
+
+tstYx = Z1tst * regressV' + regressE;
+P1pre = [P1pre tstYx];
+
+tstYx = Z2tst * regressV' + regressE;
+P2pre = [P2pre tstYx];
+
+% calculate error distance
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+end
+
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, visbias, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end

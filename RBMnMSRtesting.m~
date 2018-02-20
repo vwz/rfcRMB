@@ -1,0 +1,38 @@
+function [Pred] = RBMnMSRtesting(data, regressV, regressE, vishid, hidbias)
+
+
+% get data representation
+[poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+% initialize with single-device rbm
+[vishid, visbias, hidbias, batchposhidprobs, poshidstates] = rbm_layer1_sparse(B1trn, numhid, maxepoch, restart);
+batchposhidprobs_aux = zeros(numcases_aux,numhid,numbatches_aux);
+for batch=1:numbatches_aux
+    data = B2trn(:,:,batch);
+    poshidprobs_aux = rbm_layer_feature(data, vishid, hidbias);
+    batchposhidprobs_aux(:,:,batch) = poshidprobs_aux;
+end
+
+% do training iterations
+for epoch = epoch:maxepoch,
+    fprintf(1,'epoch %d\r',epoch);
+	
+    % do msr, with some rbm presentation
+    [regressV, regressE] = msr_part(B1trn, C1trn, B2trn, batchcor, vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux, maxepoch, xychoice);
+
+    % do rbm, with msr regression function
+    [vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rbm_part(B1trn, C1trn, B2trn, batchcor, numhid, maxepoch, restart, regressV, regressE, xychoice);
+end
+
+end
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+
+function [pred] = Predict(poshidprobs, regressV, regressE)
+    pred = regressV' * poshidprobs + regressE;
+end

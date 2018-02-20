@@ -1,0 +1,63 @@
+function [acc1 acc2] = a_run_lapsvm() 
+
+addpath(genpath('/home/vincentz/workspace/localization/working/lapsvmp_v02/'));
+    
+load('rmbmsrdata.mat');
+load('rbm_init.mat');
+
+% Get location index-to-coordinate mapping
+index = unique(Y1tst,'rows'); % find unique location index
+nloc = length(index);
+location = zeros(nloc,2);
+for i=1:nloc
+    j = index(i);
+    tmp = find(Y1tst == j);
+    location(j,:) = P1tst(tmp(1),:);
+end
+
+[numcases numdim numbatches] = size(C1trn);
+D1trn = zeros(numcases, numbatches);
+for batch=1:numbatches
+    [value, index] = ismember(C1trn(:,:,batch), location, 'rows');
+    D1trn(:, batch) = index;
+end
+
+[numcases numhid numbatches]=size(batchposhidprobs);
+poshidprobs = [];
+poshidprobs_aux = [];
+label = [];
+for batch = 1:numbatches
+    poshidprobs = [poshidprobs; batchposhidprobs(:, :, batch)];
+    poshidprobs_aux = [poshidprobs_aux; batchposhidprobs_aux(:, :, batch)];
+    label = [label; D1trn(:,batch)];
+end
+
+X1trn = poshidprobs;
+X2trn = poshidprobs_aux(5,:);
+Y1trn = label;
+    
+
+
+%%%%% lapsvm %%%%%
+[classifier_all, out, index_map, mod_num, X1trn_all] = a_lap_SVM(X1trn, X2trn, Y1trn);
+
+[X1tst] = rbm_layer_feature(NX1tst, vishid, hidbias);
+[acc1] = a_lap_SVM_check(X1tst, Y1tst, mod_num, index_map, classifier_all, X1trn_all, location);
+
+[X2tst] = rbm_layer_feature(NX2tst, vishid, hidbias);
+[acc2] = a_lap_SVM_check(X2tst, Y2tst, mod_num, index_map, classifier_all, X1trn_all, location);
+
+acc1 = 1;
+acc2 = 2;
+
+end
+
+
+
+function [poshidprobs] = rbm_layer_feature(data, vishid, hidbias)
+
+numcases = size(data,1);
+poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+
+end
+    

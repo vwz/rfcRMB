@@ -1,0 +1,44 @@
+function [v, e] = loadtsvmmodel(fname)
+
+%% This function reads tsvm model from disk to the memory.
+%% It takes the following inputs:
+%% fname -- a file name indicating where the tsvm model is stored
+%%
+%% This function outputs the following variables:
+%% v  -- the tsvm feature weights, it is a 1*numhid vector
+%% e  -- the tsvm bias term, it is a scalar
+
+modelfl = fopen(fname,'r');
+x = 0;
+while x==0
+    tline = fgetl(modelfl);
+    %% read until the line "indicating threshold b"
+    if (strfind(tline,'# threshold b, each following line is a SV (starting with alpha*y'))
+        e = textscan(tline,'%f # threshold b, each following line is a SV (starting with alpha*y)\n');
+        x = 1;
+    end    
+end
+e = cell2mat(e);
+
+buffer = fread(modelfl, Inf) ;   % Read rest of the file.
+fclose(modelfl);
+[pathstr, name, ext] = fileparts(fname);
+
+save_name = strcat('tsvm_models/sv_', name);
+fid = fopen(save_name, 'w')  ;   % Open destination file
+fwrite(fid, buffer) ;            % Save to file
+fclose(fid);
+
+[alphay, X] = svmlread(save_name);    % alphay is a numsv*1 vector, each dimension = alpha_i * y_i
+%delete(save_name);  % Delte temporary file
+[m, n] = size(X);
+alphay = repmat(alphay, 1, n);   % alphay_i * x
+v = alphay .* X;
+v = sum(v, 1);
+
+end
+
+
+
+
+

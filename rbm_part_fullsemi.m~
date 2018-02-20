@@ -1,0 +1,304 @@
+function [vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rbm_part_fullsemi(batchdata, batchlabel, batchdata_aux, batchcor12, batchcor21, batchsim11, batchsim22, numhid, maxepoch, regressV, regressE, xychoice)
+%% input is real-valued number
+%% hidden layer is binary
+%%	min L1(labeled) + weight_unlabel_rbm*L1(unlabeled) + weight_sparse * R1 + weight_pair * R2 + weight_label * L2 + weight_unlabel * R3
+%% where 
+%% 	L1 = -log P(v)
+%%	R2 = |vishid|_1
+%%	R3 = |1^T vishid|_F^2,
+%% 	L2 = weight_margin * |v|^2 + 1/l sum_k=1^l H(f, gx_k, y_k),
+%% with H is hinge loss with H(f, gx, y) = max{|f(gx)-y| - epsilon, 0}, and gx = poshidprobs.
+%% 	R3 = 1/|E|^2 sum_{k1,k2} c_{k1,k2} [f(gx_k1) - f(gx_k2)]^2,
+%% with c is correlation between x_k1 and x_k2.%%
+%% The code is based on G. Hinton's code: rbmhidlinear.m
+%
+% The program assumes that the following variables are set externally:
+% maxepoch   -- maximum number of epochs
+% numhid     -- number of hidden units
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases 2 numbatches), and each label is a 2-d coordindate
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% restart    -- set to 1 if learning starts from beginning
+% regressV   -- linear regression weight
+% regressE   -- linear regression bias
+% batchcor   -- correlation between unlabeled data and labeled data (numcases 3*K numbatches), i.e., each unlabeled instance has [<batchId, insId, corr>_1, ..., <batchId, insId, corr>_K] 
+% xychoice   -- either 1 or 2, indicating which cooridnate to use in batchlabel
+restart	      = 1;
+epsilonr      = 1;	 % hinge loss epsilon 
+epsilonw      = 0.00001; % Learning rate for weights
+epsilonvb     = 0.00001; % Learning rate for biases of visible units
+epsilonhb     = 0.00001; % Learning rate for biases of hidden units
+weightcost  = 0.0002;
+initialmomentum  = 0.5;
+finalmomentum    = 0.9;
+weight_sparse = 0.5;	% Control the weight of sparsity
+weight_pair = 20;	% Control |1^T vishid|_F^2 = 0
+[numcases numdims numbatches]=size(batchdata);
+[numcases_aux numdims_aux numbatches_aux]=size(batchdata_aux);
+K = size(batchcor12,2) / 3; % each correlation pair w.r.t. an unlabeled instance is a 3-d turple, locating the corresponding labeled instance's batchId, insId and correlation value
+one_mat = ones(numdims,numdims);
+weight_label     = 1; % trade-off parameter for labeled data loss in MSR
+weight_unlabel   = 0; % trade-off parameter for unlabeled data in MSR
+weight_unlabel_rbm  = 0.01; % trade-off parameter for unlabeled data in RBM
+
+if restart ==1,
+    restart=0;
+    epoch=1;
+    
+    % Initializing symmetric weights and biases.
+    %vishid   = 0.1*randn(numdims, numhid); %% the weight of vishid
+    load('vishid3');
+    hidbias  = zeros(1,numhid); %% the bias of hidden nodes
+    visbias  = zeros(1,numdims);%% the bias of visable nodes
+    
+    poshidprobs = zeros(numcases,numhid);
+    neghidprobs = zeros(numcases,numhid);
+    poshidprobs_aux = zeros(numcases_aux,numhid);
+    neghidprobs_aux = zeros(numcases_aux,numhid);
+    posprods    = zeros(numdims,numhid);
+    negprods    = zeros(numdims,numhid);
+    vishidinc  = zeros(numdims,numhid);
+    visbiasinc = zeros(1,numdims);
+    hidbiasinc = zeros(1,numhid);
+    sigmainc = zeros(1,numhid);
+    batchposhidprobs = zeros(numcases,numhid,numbatches);
+    batchposhidstates = zeros(numcases,numhid,numbatches);
+    batchposhidprobs_aux = zeros(numcases,numhid,numbatches);
+    batchposhidstates_aux = zeros(numcases,numhid,numbatches);
+end
+
+for epoch = epoch:maxepoch,
+    fprintf(1,'rbm epoch %d\r',epoch);
+    errsum=0;
+    
+    %% This is for the labeled data
+    for batch = 1:numbatches,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+
+	batchgradL2w = zeros(numdims,numhid);
+	batchgradR3w = zeros(numdims,numhid);
+	batchgradL2b = zeros(1,numhid);
+	batchgradR3b = zeros(1,numhid);
+        
+        %%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data = batchdata(:,:,batch);
+        poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+        batchposhidprobs(:,:,batch) = poshidprobs;
+        posprods    = data' * poshidprobs;
+        poshidact   = sum(poshidprobs);
+        posvisact = sum(data);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates = poshidprobs>rand(numcases,numhid);
+	batchposhidstates(:,:,batch) = poshidstates;
+        
+        %%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata = poshidstates*vishid'+repmat(visbias,numcases,1);
+        neghidprobs = 1./(1 + exp(-negdata*vishid - repmat(hidbias,numcases,1)));
+        negprods  = negdata'*neghidprobs;
+        neghidact = sum(neghidprobs);
+        negvisact = sum(negdata);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+	label = batchlabel(:,xychoice,batch);
+	%%%%%%%%% GRADIENT OF HINGE LOSS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%	
+	gradfw = poshidprobs .* (1 - poshidprobs);
+	for i=1:numcases
+	    gx = poshidprobs(i,:);
+	    y  = label(i);
+	    delta = CheckHingeLoss(gx, y, regressV, regressE, epsilonr);
+	    temp = (-1)*gradfw(i,:)*delta;
+	    batchgradL2w = batchgradL2w + data(i,:)'*temp;
+	    batchgradL2b = batchgradL2b + temp;
+	end
+
+	%%%%%%%%% GRADIENT OF LAPLACIAN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	cor = batchcor12(:,:,batch);
+	numedges = numcases * K;
+	for i=1:numcases
+	    gx_k1 = batchposhidprobs(i,:,batch);
+	    fg_k1 = Regression(gx_k1, regressV, regressE);
+	    temp_k1 = (-1) * gx_k1 .* (1 - gx_k1);
+	    gradfw_k1 = data(i,:)' * temp_k1;
+	    gradfb_k1 = temp_k1;
+	    for j=1:K
+		batchInd = cor(i,(j-1)*3 + 1);
+		insInd = cor(i,(j-1)*3 + 2);
+		c_k1k2 = cor(i,(j-1)*3 + 3);
+		gx_k2 = batchposhidprobs_aux(insInd,:,batchInd);
+		fg_k2 = Regression(gx_k2, regressV, regressE);
+		temp_k2 = (-1) * gx_k2 .* (1 - gx_k2);
+		gradfw_k2 = batchdata_aux(insInd,:,batchInd)' * temp_k2;
+		gradfb_k2 = temp_k2;
+		batchgradR3w = batchgradR3w + c_k1k2 * (fg_k1 - fg_k2) * (gradfw_k1 - gradfw_k2) * 2;
+		batchgradR3b = batchgradR3b + c_k1k2 * (fg_k1 - fg_k2) * (gradfb_k1 - gradfb_k2) * 2;
+	    end
+	end
+
+	cor = batchsim11(:,:,batch);
+	numedges = numedges + numcases * K;
+	for i=1:numcases_aux
+	    gx_k1 = batchposhidprobs(i,:,batch);
+	    fg_k1 = Regression(gx_k1, regressV, regressE);
+	    temp_k1 = (-1) * gx_k1 .* (1 - gx_k1);
+	    gradfw_k1 = data(i,:)' * temp_k1;
+	    gradfb_k1 = temp_k1;
+	    for j=1:K
+		batchInd = cor(i,(j-1)*3 + 1);
+		insInd = cor(i,(j-1)*3 + 2);
+		c_k1k2 = cor(i,(j-1)*3 + 3);
+		gx_k2 = batchposhidprobs(insInd,:,batchInd);
+		fg_k2 = Regression(gx_k2, regressV, regressE);
+		temp_k2 = (-1) * gx_k2 .* (1 - gx_k2);
+		gradfw_k2 = batchdata(insInd,:,batchInd)' * temp_k2;
+		gradfb_k2 = temp_k2;
+		batchgradR3w = batchgradR3w + c_k1k2 * (fg_k1 - fg_k2) * (gradfw_k1 - gradfw_k2) * 2;
+		batchgradR3b = batchgradR3b + c_k1k2 * (fg_k1 - fg_k2) * (gradfb_k1 - gradfb_k2) * 2;
+	    end
+	end
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data-negdata).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;
+        
+        %%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc = momentum*vishidinc + ...
+            epsilonw*( (posprods-negprods)/numcases - weight_label*batchgradL2w/numcases - weight_unlabel*batchgradR3w/numedges - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid );
+        visbiasinc = momentum*visbiasinc + (epsilonvb/numcases)*(posvisact-negvisact);
+        hidbiasinc = momentum*hidbiasinc + (epsilonhb/numcases)*(poshidact-neghidact) - weight_label*(epsilonhb/numcases)*batchgradL2b - weight_unlabel*(epsilonhb/numedges)*batchgradR3b;
+
+        vishid = vishid + vishidinc;
+        visbias = visbias + visbiasinc;
+        hidbias = hidbias + hidbiasinc;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+    end
+
+    %% This is for the unlabeled data
+    for batch = 1:numbatches_aux,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+
+	batchgradL2w = zeros(numdims,numhid);
+	batchgradR3w = zeros(numdims,numhid);
+	batchgradL2b = zeros(1,numhid);
+	batchgradR3b = zeros(1,numhid);        	%%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data_aux = batchdata_aux(:,:,batch);
+        poshidprobs_aux =  1./(1 + exp(-data_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        batchposhidprobs_aux(:,:,batch) = poshidprobs_aux;
+        posprods    = data_aux' * poshidprobs_aux;
+        poshidact   = sum(poshidprobs_aux);
+        posvisact = sum(data_aux);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates_aux = poshidprobs_aux>rand(numcases_aux,numhid);
+	batchposhidstates_aux(:,:,batch) = poshidstates_aux;
+       
+	%%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata_aux = poshidstates_aux*vishid'+repmat(visbias,numcases_aux,1);
+        neghidprobs_aux = 1./(1 + exp(-negdata_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        negprods  = negdata_aux' * neghidprobs_aux;
+        neghidact = sum(neghidprobs_aux);
+        negvisact = sum(negdata_aux);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+	%%%%%%%%% GRADIENT OF LAPLACIAN %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	cor = batchcor21(:,:,batch);
+	numedges = numcases_aux * K;
+	for i=1:numcases_aux
+	    gx_k1 = batchposhidprobs_aux(i,:,batch);
+	    fg_k1 = Regression(gx_k1, regressV, regressE);
+	    temp_k1 = (-1) * gx_k1 .* (1 - gx_k1);
+	    gradfw_k1 = data_aux(i,:)' * temp_k1;
+	    gradfb_k1 = temp_k1;
+	    for j=1:K
+		batchInd = cor(i,(j-1)*3 + 1);
+		insInd = cor(i,(j-1)*3 + 2);
+		c_k1k2 = cor(i,(j-1)*3 + 3);
+		gx_k2 = batchposhidprobs(insInd,:,batchInd);
+		fg_k2 = Regression(gx_k2, regressV, regressE);
+		temp_k2 = (-1) * gx_k2 .* (1 - gx_k2);
+		gradfw_k2 = batchdata(insInd,:,batchInd)' * temp_k2;
+		gradfb_k2 = temp_k2;
+		batchgradR3w = batchgradR3w + c_k1k2 * (fg_k1 - fg_k2) * (gradfw_k1 - gradfw_k2) * 2;
+		batchgradR3b = batchgradR3b + c_k1k2 * (fg_k1 - fg_k2) * (gradfb_k1 - gradfb_k2) * 2;
+	    end
+	end
+
+	cor = batchsim22(:,:,batch);
+	numedges = numedges + numcases_aux * K;
+	for i=1:numcases_aux
+	    gx_k1 = batchposhidprobs_aux(i,:,batch);
+	    fg_k1 = Regression(gx_k1, regressV, regressE);
+	    temp_k1 = (-1) * gx_k1 .* (1 - gx_k1);
+	    gradfw_k1 = data_aux(i,:)' * temp_k1;
+	    gradfb_k1 = temp_k1;
+	    for j=1:K
+		batchInd = cor(i,(j-1)*3 + 1);
+		insInd = cor(i,(j-1)*3 + 2);
+		c_k1k2 = cor(i,(j-1)*3 + 3);
+		gx_k2 = batchposhidprobs_aux(insInd,:,batchInd);
+		fg_k2 = Regression(gx_k2, regressV, regressE);
+		temp_k2 = (-1) * gx_k2 .* (1 - gx_k2);
+		gradfw_k2 = batchdata_aux(insInd,:,batchInd)' * temp_k2;
+		gradfb_k2 = temp_k2;
+		batchgradR3w = batchgradR3w + c_k1k2 * (fg_k1 - fg_k2) * (gradfw_k1 - gradfw_k2) * 2;
+		batchgradR3b = batchgradR3b + c_k1k2 * (fg_k1 - fg_k2) * (gradfb_k1 - gradfb_k2) * 2;
+	    end
+	end
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data_aux-negdata_aux).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;
+        
+        %%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc = momentum*vishidinc + ...
+            epsilonw*( weight_unlabel_rbm*(posprods-negprods)/numcases_aux - weight_unlabel*batchgradR3w/numedges - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid );        visbiasinc = momentum*visbiasinc + weight_unlabel_rbm*(epsilonvb/numcases_aux)*(posvisact-negvisact);
+        hidbiasinc = momentum*hidbiasinc + weight_unlabel_rbm*(epsilonhb/numcases_aux)*(poshidact-neghidact) - weight_unlabel*(epsilonhb/numedges)*batchgradR3b;
+        vishid = vishid + vishidinc;
+        visbias = visbias + visbiasinc;
+        hidbias = hidbias + hidbiasinc;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+    end
+
+    total_error(epoch) =errsum; 
+    fprintf(1, 'rbm epoch %4i error %f \n', epoch, errsum);
+    
+end
+plot(total_error)
+
+end
+
+function value = CheckHingeLoss(gx, y, regressV, regressE, epsilonr) 
+    value = 0;
+    f = Regression(gx, regressV, regressE);
+    if abs(f - y) >= epsilonr
+	if f >= y
+	    value = 1;
+	else
+	    value = -1;
+	end
+    else
+	value = 0;
+    end
+end
+
+function value = Regression(gx, regressV, regressE)
+   value = regressV * gx' + regressE;
+end

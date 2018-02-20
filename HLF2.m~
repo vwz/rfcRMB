@@ -1,0 +1,158 @@
+function [errdistA, errdistB] = HLF2(X1trn, Y1trn, P1trn, X1tst, P1tst, X2tst, P2tst)
+%% This code is implemented for:
+%%   "Hyperbolic location fingerprinting: a calibration-free solution for handling differences in signal strength", Kjargaard and Munk, PerCom, 2008.
+%%
+%% input: X1trn = ncases * ndim, Y1trn = ncases * 1, P1trn = ncases * 2
+%% 	  X1tst = ncases_tst1 * ndim, P1tst = ncases_tst1 * 2
+%% 	  X2tst = ncases_tst2 * ndim, P2tst = ncases_tst2 * 2
+%%
+%% Feature transformation (normalized log signal-strength ratio): 
+%%   nlr(o_i, o_j) = log (v_i/v_j) - log(1/v_max)  
+%%   where, o_i = (AP_i, RSS value v_i), v_max = max RSS value among all the v's.
+%%
+%% Localization based on histogram model:
+%%   for each location l, each dimension k, we discretize its nlr_k values and create a histogram.
+%%   P(nlr_k|l) = Histogram(nlr_k, l).
+%%   l* = argmax sum_k log P(nlr_k|l).
+%% 
+%% The whole algorithm is:
+%%   given surveyor device data S = [s^(1), s^(2), ...] and user device data X = [x^(1), x^(2), ...]
+%%   step 1: for each s^(k), transform it into a vector of nlr(s^(k)_i, s^(k)_j), for each pair of (i,j);
+%%   step 2: train a histrogram-based localization model on S;
+%%   step 3: for each x^(k), transform it into a vector of nlr(x^(k)_i, x^(k)_j), for each pair of (i,j);
+%%   step 4: test X.
+
+% do training and get histogram model
+
+binsize = 0.005;
+[nlrmin, nlrmax] = GetRange()
+[nbins, model] = HLFtrain(X1trn, Y1trn, binsize, nlrmin, nlrmax);
+
+% do testing for device 1
+S = GetPairwiseFeature(X1tst);
+ncases = size(S,1);
+P1pred = [];
+count = 0;
+for i=1:ncases
+    if mod(i,ceil(ncases/10)) == 0
+	count = count + 1;
+	disp(count);
+    end
+    s = S(i,:);
+    [location] = Predict(s, model, binsize, nlrmin, nbins);
+    index = find(Y1trn==location);
+    P1pred = [P1pred; P1trn(index(1),:)];
+end
+
+temp = sum((P1pred-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+% do testing for device 2
+S = GetPairwiseFeature(X2tst);
+ncases = size(S,1);
+P2pred = [];
+count = 0;
+for i=1:ncases
+    if mod(i,ceil(ncases/10)) == 0
+	count = count + 1;
+	disp(count);
+    end
+    s = S(i,:);
+    [location] = Predict(s, model, binsize, nlrmin, nbins);
+    index = find(Y1trn==location);
+    P2pred = [P2pred; P1trn(index(1),:)];
+end
+
+temp = sum((P2pred-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+end
+
+%%%%%%
+function [nbins, model] = HLFtrain(X, Y, binsize, nlrmin, nlrmax)
+% input: X = ncases * ndim, Y = ncases * 1
+% output: vmax for normalize log signal-strength ratio
+%	  (nlrmin, nbins, binsize) determines the histogram
+%	  model = nbins * nfeatures * nlocations
+
+% expect to get S of ncases * nfeatures, where nfeatures = (nAPs^2 - nAPs) / 2
+S = GetPairwiseFeature(X);
+binranges = nlrmin:binsize:nlrmax;
+nbins = length(binranges);
+
+% expect to get a histogram model, nfeatures * nbins * nlocations
+locations = unique(Y);
+nlocations = length(locations);
+nfeatures = size(S,2);
+model = zeros(nbins, nfeatures, nlocations);
+for i = 1:nlocations
+    location = locations(i);
+    index = find(Y==location);
+    bincounts = histc(S(index,:), binranges);
+    bincounts = bincounts + 1/length(binranges); % smoothing
+    bincounts = bincounts ./ repmat(sum(bincounts,1), nbins, 1);
+    model(:,:,i) = bincounts;
+end
+
+end
+
+%%%%%%
+function [nlrmin, nlrmax] = GetRange()
+
+vmin = -100;
+vmax = -20;
+nlrmax = log(vmin/vmax);
+nlrmin = log(vmax/vmin);
+
+end
+
+%%%%%%
+function [S] = GetPairwiseFeature(X) 
+% input: X = ncases * ndim, vmax is the max v-value for normalization
+% output: each S(i,:) is a vector of normalized log signal-strength ratio
+
+S = [];
+nAPs = size(X,2);
+for i=1:nAPs-1
+   for j=i+1:nAPs
+      r = X(:,i) ./ X(:,j);
+      nlr = log(r);
+      S = [S nlr];
+   end
+end
+
+end
+
+%%%%%%
+function [location] = Predict(s, model, binsize, nlrmin, nbins) 
+% input: s = 1 * nfeatures, 
+%	 model = nbins * nfeatures * nlocations
+% output: location
+
+% expect to get bin = 1 * nfeatures
+bin = FindBinIndex(binsize, nlrmin, s, nbins);
+
+% P(nlr_k|l) = Histogram(nlr_k, l).
+% l* = argmax sum_k log P(nlr_k|l).
+[nbins, nfeatures, nlocations] = size(model);
+p = zeros(nlocations,1);
+for i=1:nlocations
+    for j=1:length(bin)
+	pj = log(model(bin(j), j, i));
+	p(i) = p(i) + pj;
+    end
+end
+
+[maxp, location] = max(p);
+
+end
+
+
+%%%%%%
+function [bin] = FindBinIndex(binsize, nlrmin, s, nbins) 
+% input: s = 1 * nfeatures
+% output: bin = 1 * nfeatures
+
+bin = min(ceil((s - nlrmin) / binsize), nbins); % do not exceed max bin index, which is nbins
+end  
+

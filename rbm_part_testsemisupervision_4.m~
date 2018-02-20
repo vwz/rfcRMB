@@ -1,0 +1,276 @@
+function [vishid, visbias, hidbias, batchposhidprobs, batchposhidprobs_aux] = rbm_part_testsemisupervision_4(batchdata, batchlabel, batchdata_aux, batchcor, numhid, maxepoch)
+%% input is real-valued number
+%% hidden layer is binary
+%%	min L1 + weight_sparse * R1 + weight_pair * R2
+%% where 
+%% 	L1 = -log P(v)
+%%	R2 = |vishid|_1
+%%	R3 = |1^T vishid|_F^2.%%
+%% The code is based on G. Hinton's code: rbmhidlinear.m
+%
+% The program assumes that the following variables are set externally:
+% maxepoch   -- maximum number of epochs
+% numhid     -- number of hidden units
+% batchdata  -- the labeled data that is divided into batches (numcases numdims numbatches)
+% batchlabel -- the labels that are divided into batches (numcases 2 numbatches), and each label is a 2-d coordindate
+% batchdata_aux   -- the auxiliary unlabeled data that is divided into batches (numcases numdims numbatches)
+% restart    -- set to 1 if learning starts from beginning
+% regressV   -- linear regression weight
+% regressE   -- linear regression bias
+% batchcor   -- correlation between unlabeled data and labeled data (numcases 3*K numbatches), i.e., each unlabeled instance has [<batchId, insId, corr>_1, ..., <batchId, insId, corr>_K] 
+% xychoice   -- either 1 or 2, indicating which cooridnate to use in batchlabel
+restart	      = 1;
+epsilonr      = 1;	 % hinge loss epsilon 
+epsilonw      = 0.00001; % Learning rate for weights
+epsilonvb     = 0.00001; % Learning rate for biases of visible units
+epsilonhb     = 0.00001; % Learning rate for biases of hidden units
+weightcost  = 0.0002;
+initialmomentum  = 0.5;
+finalmomentum    = 0.9;
+weight_sparse = 0.5;	% Control the weight of sparsity
+weight_pair = 20;	% Control |1^T vishid|_F^2 = 0
+
+[numcases numdims numbatches]=size(batchdata);
+[numcases_aux numdims_aux numbatches_aux]=size(batchdata_aux);
+one_mat = ones(numdims,numdims);
+
+if restart ==1,
+    restart=0;
+    epoch=1;
+    
+    % Initializing symmetric weights and biases.
+    %vishid   = 0.1*randn(numdims, numhid); %% the weight of vishid
+    %save('vishid2', 'vishid');
+    load('vishid3');
+    hidbias  = zeros(1,numhid); %% the bias of hidden nodes
+    visbias  = zeros(1,numdims);%% the bias of visable nodes
+    
+    poshidprobs = zeros(numcases,numhid);
+    neghidprobs = zeros(numcases,numhid);
+    poshidprobs_aux = zeros(numcases_aux,numhid);
+    neghidprobs_aux = zeros(numcases_aux,numhid);
+    posprods    = zeros(numdims,numhid);
+    negprods    = zeros(numdims,numhid);
+    vishidinc  = zeros(numdims,numhid);
+    a = zeros(1,numhid);
+    visbiasinc = zeros(1,numdims);
+    hidbiasinc = zeros(1,numhid);
+    sigmainc = zeros(1,numhid);
+    batchposhidprobs = zeros(numcases,numhid,numbatches);
+    batchposhidstates = zeros(numcases,numhid,numbatches);
+    batchposhidprobs_aux = zeros(numcases_aux,numhid,numbatches_aux);
+    batchposhidstates_aux = zeros(numcases_aux,numhid,numbatches_aux);
+end
+
+for epoch = epoch:maxepoch,
+    fprintf(1,'rbm epoch %d\r',epoch);
+    errsum=0;
+
+    minnumbatches = min(numbatches, numbatches_aux);
+    
+    %% This is for the labeled data
+    for batch = 1:minnumbatches,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+
+        %%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data = batchdata(:,:,batch);
+        poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+        batchposhidprobs(:,:,batch) = poshidprobs;
+        posprods    = data' * poshidprobs;
+        poshidact   = sum(poshidprobs);
+        posvisact = sum(data);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates = poshidprobs>rand(numcases,numhid);
+	batchposhidstates(:,:,batch) = poshidstates;
+        
+        %%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata = poshidstates*vishid'+repmat(visbias,numcases,1);
+        neghidprobs = 1./(1 + exp(-negdata*vishid - repmat(hidbias,numcases,1)));
+        negprods  = negdata'*neghidprobs;
+        neghidact = sum(neghidprobs);
+        negvisact = sum(negdata);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data-negdata).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;
+        
+        %%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc = momentum*vishidinc + ...
+            epsilonw*( (posprods-negprods)/numcases - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid);
+
+        visbiasinc = momentum*visbiasinc + (epsilonvb/numcases)*(posvisact-negvisact);
+        hidbiasinc = momentum*hidbiasinc + (epsilonhb/numcases)*(poshidact-neghidact);
+        vishid = vishid + vishidinc;
+        visbias = visbias + visbiasinc;
+        hidbias = hidbias + hidbiasinc;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+	vishidinc0 = vishidinc;
+	visbiasinc0 = visbiasinc;
+	hidbiasinc0 = hidbiasinc;
+
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+        
+        %%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data_aux = batchdata_aux(:,:,batch);
+        poshidprobs_aux =  1./(1 + exp(-data_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        batchposhidprobs_aux(:,:,batch) = poshidprobs_aux;
+        posprods    = data_aux' * poshidprobs_aux;
+        poshidact   = sum(poshidprobs_aux);
+        posvisact = sum(data_aux);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates_aux = poshidprobs_aux>rand(numcases_aux,numhid);
+	batchposhidstates_aux(:,:,batch) = poshidstates_aux;
+        
+       
+	%%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata_aux = poshidstates_aux*vishid'+repmat(visbias,numcases_aux,1);
+        neghidprobs_aux = 1./(1 + exp(-negdata_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        negprods  = negdata_aux' * neghidprobs_aux;
+        neghidact = sum(neghidprobs_aux);
+        negvisact = sum(negdata_aux);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data_aux-negdata_aux).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;        
+
+	%%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc1 = momentum*vishidinc0 + ...
+            epsilonw*( (posprods-negprods)/numcases_aux - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid);
+
+        visbiasinc1 = momentum*visbiasinc0 + (epsilonvb/numcases_aux)*(posvisact-negvisact);
+        hidbiasinc1 = momentum*hidbiasinc0 + (epsilonhb/numcases_aux)*(poshidact-neghidact);
+	vishid = vishid + vishidinc1;
+        visbias = visbias + visbiasinc1;
+        hidbias = hidbias + hidbiasinc1;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+    end
+
+    %% This is for the labeled data
+    if minnumbatches < numbatches
+    for batch = 1+minnumbatches:numbatches,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+
+        %%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data = batchdata(:,:,batch);
+        poshidprobs =  1./(1 + exp(-data*vishid - repmat(hidbias,numcases,1)));
+        batchposhidprobs(:,:,batch) = poshidprobs;
+        posprods    = data' * poshidprobs;
+        poshidact   = sum(poshidprobs);
+        posvisact = sum(data);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates = poshidprobs>rand(numcases,numhid);
+	batchposhidstates(:,:,batch) = poshidstates;
+        
+        %%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata = poshidstates*vishid'+repmat(visbias,numcases,1);
+        neghidprobs = 1./(1 + exp(-negdata*vishid - repmat(hidbias,numcases,1)));
+        negprods  = negdata'*neghidprobs;
+        neghidact = sum(neghidprobs);
+        negvisact = sum(negdata);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data-negdata).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;
+        
+        %%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc = momentum*vishidinc + ...
+            epsilonw*( (posprods-negprods)/numcases - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid);
+
+        visbiasinc = momentum*visbiasinc + (epsilonvb/numcases)*(posvisact-negvisact);
+        hidbiasinc = momentum*hidbiasinc + (epsilonhb/numcases)*(poshidact-neghidact);
+        vishid = vishid + vishidinc;
+        visbias = visbias + visbiasinc;
+        hidbias = hidbias + hidbiasinc;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+    end
+    end
+
+    %% This is for the unlabeled data
+    if minnumbatches < numbatches_aux
+    for batch = 1+minnumbatches:numbatches_aux,
+        fprintf(1,'epoch %d batch %d\r',epoch,batch);
+        
+        %%%%%%%%% START POSITIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        data_aux = batchdata_aux(:,:,batch);
+        poshidprobs_aux =  1./(1 + exp(-data_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        batchposhidprobs_aux(:,:,batch) = poshidprobs_aux;
+        posprods    = data_aux' * poshidprobs_aux;
+        poshidact   = sum(poshidprobs_aux);
+        posvisact = sum(data_aux);
+        
+        %%%%%%%%% END OF POSITIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        poshidstates_aux = poshidprobs_aux>rand(numcases_aux,numhid);
+	batchposhidstates_aux(:,:,batch) = poshidstates_aux;
+        
+       
+	%%%%%%%%% START NEGATIVE PHASE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        negdata_aux = poshidstates_aux*vishid'+repmat(visbias,numcases_aux,1);
+        neghidprobs_aux = 1./(1 + exp(-negdata_aux*vishid - repmat(hidbias,numcases_aux,1)));
+        negprods  = negdata_aux' * neghidprobs_aux;
+        neghidact = sum(neghidprobs_aux);
+        negvisact = sum(negdata_aux);
+        
+        %%%%%%%%% END OF NEGATIVE PHASE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+	%%%%%%%%% SET MOMENTUM %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        err= sum(sum( (data_aux-negdata_aux).^2 ));
+        errsum = err + errsum;
+        if epoch>5,
+            momentum=finalmomentum;
+        else
+            momentum=initialmomentum;
+        end;        
+
+	%%%%%%%%% UPDATE WEIGHTS AND BIASES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        vishidinc = momentum*vishidinc + ...
+            epsilonw*( (posprods-negprods)/numcases_aux - weight_sparse*sign(vishid) - weight_pair*2*one_mat*vishid);
+
+        visbiasinc = momentum*visbiasinc + (epsilonvb/numcases_aux)*(posvisact-negvisact);
+        hidbiasinc = momentum*hidbiasinc + (epsilonhb/numcases_aux)*(poshidact-neghidact);
+	vishid = vishid + vishidinc;
+        visbias = visbias + visbiasinc;
+        hidbias = hidbias + hidbiasinc;
+        
+        %%%%%%%%%%%%%%%% END OF UPDATES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+    end
+    end
+
+    total_error(epoch) =errsum; 
+    fprintf(1, 'rbm epoch %4i error %f \n', epoch, errsum);
+    
+end
+plot(total_error)
+
+
+end

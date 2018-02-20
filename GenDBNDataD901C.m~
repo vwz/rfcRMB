@@ -1,0 +1,41 @@
+function [D901C_Nxtrn, D901C_Nxtst, D901C_Bxtrn] = GenDBNDataD901C()
+
+xmean = mean(D901C_xtrn,1);
+
+D901C_Nxtrn = getnorm(D901C_xtrn, xmean);
+D901C_Nxtst = getnorm(D901C_xtst, xmean);
+
+D901C_Bxtrn = GenDBNfeatures(D901C_Nxtrn);
+
+end
+
+function B = GenDBNfeatures(X)
+
+numbatches = 10;
+numtotal = size(X,1);
+rindex = randperm(numtotal);
+numeach = floor(numtotal / numbatches);
+batchdata = [];
+for i=1:10
+  startId = 1 + (i-1) * numeach;
+  endId = i * numeach;
+  %if i==10
+  %  endId = numtotal;
+  %end
+  batch = X(startId:endId, :);
+  batchdata(:,:,i) = batch; 
+end
+
+[numcases numdims numbatches] = size(batchdata);
+B = batchdata;
+
+end
+
+function [NX] = getnorm(X, xmean)
+
+NX = X - repmat(xmean, size(X,1), 1);
+%NX1 = repmat(sqrt(sum(NX.^2,1)), size(NX,1), 1); %normalized by column
+%NX1 = repmat(sqrt(sum(NX.^2,2)), 1, size(NX,2)); %normalized by row
+%NX = NX ./ NX1;
+
+end

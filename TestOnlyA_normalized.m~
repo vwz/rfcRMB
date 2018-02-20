@@ -1,0 +1,58 @@
+function [errdistA errdistB] = TestOnlyA_normalized()
+
+% device A full, device B none, no MTL
+
+load Data_all_device.mat;
+addpath '../libsvm-3.18/matlab/';
+
+% ------ test device B ---------
+xmean = mean(X1trn,1);
+
+% for x-coordinate
+Z = getnorm(X1trn, xmean);
+Y = P1trn(:,1);
+model = svmtrain(Y, Z, '-s 3 -t 0');
+
+Z = getnorm(X1tst, xmean);
+Y = P1tst(:,1);
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z, model);
+P1pre = tstYx;
+
+Z = getnorm(X2tst, xmean);
+Y = P2tst(:,1);
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z, model);
+P2pre = tstYx;
+
+% for y-coordinate
+Z = getnorm(X1trn, xmean);
+Y = P1trn(:,2);
+model = svmtrain(Y, Z, '-s 3 -t 0');
+
+Z = getnorm(X1tst, xmean);
+Y = P1tst(:,2);
+[tstYx, accuracy, dec_values] = svmpredict(Y, Z, model);
+P1pre = [P1pre tstYx];
+
+Z = getnorm(X2tst, xmean);
+Y = P2tst(:,2);[tstYx, accuracy, dec_values] = svmpredict(Y, Z, model);
+P2pre = [P2pre tstYx];
+
+% calculate error distance
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
+end
+
+function [Z] = getnorm(X, xmean)
+
+Z = X - repmat(xmean, size(X,1), 1);
+%Z1 = repmat(sqrt(sum(Z.^2,1)), size(Z,1), 1); %normalized by column
+Z1 = repmat(sqrt(sum(Z.^2,2)), 1, size(Z,2)); %normalized by row
+Z = Z ./ Z1;
+%Z1 = norm(Z, 'fro'); %normalized by column + row
+%Z = Z / Z1;
+
+end

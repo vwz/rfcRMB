@@ -1,0 +1,807 @@
+1st-order features:
+errdistA = 1.9021
+errdistB = 21.8633
+
+2nd-order features:
+errdistA = 3.5470
+errdistB = 12.3827
+[more robust, but less discriminative]
+
+3rd-order features:
+errdistA = 2.0450
+errdistB = 12.3089
+[robust and discriminative]
+
+3rd-order features (enhanced):
+errdistA = 2.0480
+errdistB = 12.3006
+[not every feature is useful]
+
+-------------------------------
+
+1st-order features + normalization (nCase x nDim, mean 0 and normalize by column to have l2 norm 1):
+errdistA = 5.3584
+errdistB = 16.4445
+
+dbn (numhid = 100) with normalization (nCase x nDim, mean 0 and normalize by column to have l2 norm 1):
+errdistA = 19.9001
+errdistB = 19.9001
+
+dbn (numhid = 1000) with normalization (nCase x nDim, mean 0 and normalize by column to have l2 norm 1):
+errdistA = 19.9001
+errdistB = 19.9001
+
+dbn (numhid = 10000) with normalization (nCase x nDim, mean 0 and normalize by column to have l2 norm 1):
+errdistA = 19.9003
+errdistB = 19.9003
+
+------------------------------
+1st-order features + normalization (nCase x nDim, mean 0 and normalize by row to have l2 norm 1):
+errdistA = 1.7335
+errdistB = 11.8455
+
+dbn (numhid = 100) with normalization (nCase x nDim, mean 0 and normalize by row to have l2 norm 1):
+errdistA = 19.9001
+errdistB = 19.9001
+
+Same with 1) numhid = 1000 and 10000
+- #epoch is too big (overfit)
+- normalization is not appropriate
+
+dbn (numhid = 100) with normalization (nCase x nDim, mean 0):
+errdistA = 1.4903
+errdistB = 9.1491 (around using 25% labeled data of device B in training based on our previous paper)
+
+------------------------------
+dbn (numhid = 100) with normalization (nCase x nDim, mean 0), without W sum constraint:
+errdistA = 1.6782
+errdistB = 13.2731
+
+------------------------------
+There are several major parts of this model:
+- hinge loss regression (checked before)
+- semi-supervision
+- feedback of regression output to rbm
+
+Experiment 1: check hinge loss regression instead of svr
+- use a rbm-then-regression model without regression feedback
+- no semi-supervision
+- replace svr to hinge loss regression
+- code = TestLinearRegression.m
+- msr.result = [2.14, 6.90], [2.03, 6.51]
+- svr.result = [1.60, 9.06], [1.61, 7.90] (looks like overfit)
+
+Experiment 2: check semi-supervision
+- use a rbm-then-regression model without regression feedback
+- add semi-supervision to both rbm and msr
+
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.1 * unlabeled data
+++ msr.result = [2.53, 7.64], [2.82, 6.76]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.01 * unlabeled data
+++ msr.result = [2.46, 8.46], [3.34, 7.87]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.001 * unlabeled data
+++ msr.result = [2.99, 7.45], [3.31, 7.86]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.16, 6.82], [2.71, 7.62]
+
+- rbm = labeled data, msr = labeled data + 0.1 * unlabeled data
+++ msr.result = [2.16, 7.44], [2.23, 5.84]
+- rbm = labeled data, msr = labeled data + 0.01 * unlabeled data
+++ msr.result = [1.88, 6.29], [2.23, 8.62]
+- rbm = labeled data, msr = labeled data + 0.001 * unlabeled data
+++ msr.result = [2.45, 5.45], [2.08, 6.16]
+- rbm = labeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [1.88, 5.81], [2.11, 6.75]
+
+%% topK = 3
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.1 * unlabeled data
+++ msr.result = [2.59, 7.23], [2.22, 8.07]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.01 * unlabeled data
+++ msr.result = [2.35, 8.99], [3.09, 7.29]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.001 * unlabeled data
+++ msr.result = [4.06, 7.37], [3.24, 8.17]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.41, 7.68], [2.04, 8.78]
+
+%% topK = 10;
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.1 * unlabeled data
+++ msr.result = [3.13, 7.38], [2.45, 7.27]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.01 * unlabeled data
+++ msr.result = [3.67, 7.47], [3.08, 7.96]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0.001 * unlabeled data
+++ msr.result = [2.57, 7.29], [2.41, 7.83]
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.53, 8.57], [3.25, 7.46]
+
+%% conclusion
+- topK = 5 seems best
+- including unlabeled data in rbm seems not helping, probably because previously we bias to labeled data
+- unlabeled data seems not helping regression much
+
+Experiment 2.2: according to Shenghua's advice, tune rbm parameters to double check whether labeled data help in rbm training
+
+---- best result so far, maxepoch = 20 ----
+%% topK = 5
+- rbm = labeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [1.88, 5.81], [2.11, 6.75]
+
+---- maxepoch = 20 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.16, 6.82], [2.71, 7.62]
+
+%% topK = 3
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.41, 7.68], [2.04, 8.78]
+
+%% topK = 10;
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.53, 8.57], [3.25, 7.46]
+
+---- maxepoch = 40 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.81, 7.44], [2.69, 8.02]
+
+%% topK = 3
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.53, 6.83], [3.10, 7.18]
+
+%% topK = 10
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.61, 6.90], [2.76, 7.39]
+
+---- maxepoch = 60 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.24, 7.18]
+
+%% topK = 3
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.45, 7.59]
+
+---- maxepoch = 30 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.85, 7.18], [2.58, 7.45]
+
+---- maxepoch = 50 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.99, 6.89]
+
+---- maxepoch = 35 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.08, 6.71]
+
+---- maxepoch = 10 ----
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.30, 7.49]
+
+---- maxepoch = 20, weight_sparse = 0.05 (previous weight_sparse = 0.5)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.25, 7.87]
+
+---- maxepoch = 20, weight_sparse = 5 (previous weight_sparse = 0.5)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [3.54, 7.72]
+
+---- maxepoch = 20, weight_sparse = 1 (previous weight_sparse = 0.5)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.88, 8.49]
+
+---- maxepoch = 20, weight_sparse = 0.1 (previous weight_sparse = 0.5)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.08, 6.99], [3.07, 8.52]
+
+---- maxepoch = 20, weight_sparse = 0.5, weight_pair = 100 (previous weight_pair = 20)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.83, 7.14]
+
+---- maxepoch = 20, weight_sparse = 0.5, weight_pair = 1 (previous weight_pair = 20)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.97, 7.85]
+
+---- maxepoch = 20, weight_sparse = 0.5, weight_pair = 50 (previous weight_pair = 20)
+%% topK = 5
+- rbm = labeled data + unlabeled data, msr = labeled data + 0 * unlabeled data
+++ msr.result = [2.22, 7.06], [3.39, 8.91]
+
+******
+same initialization for rbm
+- no unlabeled data: [2.2, 5.6]
+- unlabeled data, do not update the momentum part's inc (inc0 = inc from labeled data): [2.5, 5.5]
+- unlabeled data, update the momentum part's inc partially (inc0 = inc from labeled data, but later set inc = inc1): [2.5, 5.7]
+- unlabeled data, update the momentum part's inc normally (labeled/unlabeled same): [1.9, 8.4]
+- unlabeled data, update the momentum part's inc normally but iteratively: [2.1, 8.8]
+- unlabeled data, do not update the momentum part's inc: [2.7, 5.4]
+
+
+-------------------
+only use correlation, 
+topK = 5, errdistB = 9.1283
+topK = 3, errdistB = 9.2069
+topK = 1, errdistB = 9.9617
+
+
+--------------------------------------------
+add more graph laplacian
+
+weight_unlabel   = 0.01; % trade-off parameter for unlabeled data in MSR/RBM
+weight_unlabel_rbm  = 1; % trade-off parameter for unlabeled data in RBM
+[3.7374, 5.8909]
+
+weight_unlabel   = 0.01; % trade-off parameter for unlabeled data in MSR/RBM
+weight_unlabel_rbm  = 0.01; % trade-off parameter for unlabeled data in RBM
+[3.9151, 6.0573]
+
+weight_unlabel   = 0.1; % trade-off parameter for unlabeled data in MSR/RBM
+weight_unlabel_rbm  = 1; % trade-off parameter for unlabeled data in RBM
+[4.3441, 6.9697]
+
+weight_unlabel   = 0.001; % trade-off parameter for unlabeled data in MSR/RBM
+weight_unlabel_rbm  = 1; % trade-off parameter for unlabeled data in RBM
+[3.6833, 5.7463]
+
+weight_unlabel   = 0; % trade-off parameter for unlabeled data in MSR/RBM
+weight_unlabel_rbm  = 1; % trade-off parameter for unlabeled data in RBM
+[3.6769, 5.7322]
+
+---------------------------------------------
+dataset 2
+
+Setting 1)-3) are all semi-supervised in both RBM and MSR
+1) D901C (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[8.1066, 9.2521]
+
+2) D901C (labeled) + EEE900A (unlabeled) + others (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.2492, 9.1393]
+
+3) D901C (labeled) [no RBM] + EEE900A (unlabeled) -> EEE900A (test)
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.9211, 9.7028]
+
+4) D901C (labeled) -> EEE900A (test), 
+weight_unlabel   = 0; 
+weight_unlabel_rbm  = 0;
+[7.8336, 9.2342]
+
+Conclusion: 
+- with RBM is better, but not much better (suspect that MSR step length is too small)
+- more unlabeled data in training is better
+
+---------------------------------------------
+dataset 2
+Tune step length in MSR, always have
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+
+1) D901C (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+epsilonv,, = 0.1; %0.05; % Learning rate for weights
+epsilone,, = 0.1; %0.05; % Learning rate for bias
+[8.7676, 9.8139]
+
+2) D901C (labeled) + EEE900A (unlabeled) + others (unlabeled) -> EEE900A (test), 
+epsilonv,, = 0.1; %0.05; % Learning rate for weights
+epsilone,, = 0.1; %0.05; % Learning rate for bias
+[7.9121, 9.5792]
+
+3) D901C (labeled) [no RBM] + EEE900A (unlabeled) -> EEE900A (test)
+epsilonv,, = 0.1; %0.05; % Learning rate for weights
+epsilone,, = 0.1; %0.05; % Learning rate for bias
+[8.3117, 9.9401]
+
+---------------------------------------------
+dataset 2
+
+The dataset paper says the error distance is less than 10m, and they use N8102 as surveyor, and the others as users
+
+Setting 1: single device to single device, no RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.1;
+[7.0756, 9.9525]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.8359, 7.1044]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.4415, 8.5460]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7224, 6.9419]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.9216, 8.7519]
+
+Setting 2: single device to single device, with RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.1;
+[7.0901, 9.4899]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.5875, 6.3642]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.3161, 8.3640]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.5574, 6.8768]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7676, 7.3199]
+
+Setting 3: single device to multi device, with RBM
+1) N8102 (labeled) + Others (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.1;
+[6.7496, 9.3486]
+
+2) N8102 (labeled) + Others (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7496, 6.6444]
+
+3) N8102 (labeled) + Others (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7496, 8.2780]
+
+4) N8102 (labeled) + Others (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7496, 7.0828]
+
+5) N8102 (labeled) + Others (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7496, 7.7736]
+
+Conclusion: 
+1. possibly can further improve the performance
+no RBM = [9.95, 7.10, 8.55, 6.94, 8.75]
+RBM, = [9.45, 6.36, 8.36, 6.88, 7.32]
+Others = [9.35, 6.64, 8.28, 7.08, 7.77]
+
+2. what previous paper does: use A + B labeled data pairs to learn the mapping, then use A as train, use B as test
+1) N8102 (labeled) + D901C (labeled) -> D901C (test), 
+[5]
+
+2) N8102 (labeled) + EEE900A (labeled) -> EEE900A (test), 
+[1.8]
+
+3) N8102 (labeled) + N95 (labeled) -> N95 (test), 
+[6]
+
+4) N8102 (labeled) + N8101 (labeled) -> N8101 (test), 
+[1]
+
+5) N8102 (labeled) + X61 (labeled) -> X61 (test), 
+[2]
+
+---------------------------------------------
+dataset 2
+
+To further improve the performance by increasing the RBM #iter: maxepoch_rbm = 40;
+
+Setting 1: single device to single device, no RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[8.1372   10.4227]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.8247, 8.3175]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[8.4709, 9.4567]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[7.8280, 7.9029]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[8.0716, 9.5392]
+
+Setting 2: single device to single device, with RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[]6.2268, 8.9168]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.6950, 5.3487]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7837, 7.7937]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8958, 6.1655]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.1201, 6.8720]
+
+Setting 3: single device to multi device, with RBM
+1) N8102 (labeled) + Others (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[5.8731, 9.1103]
+
+2) N8102 (labeled) + Others (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8731, 5.6506]
+
+3) N8102 (labeled) + Others (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8731, 7.5869]
+
+4) N8102 (labeled) + Others (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8731, 6.1867]
+
+5) N8102 (labeled) + Others (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8731, 7.1450]
+
+Conclusion:
+when RBM #iter = 40
+Single: [8.9168, 5.3487, 7.7937, 6.1655, 6.8720]
+Others: [9.1103, 5.6506, 7.5869, 6.1867, 7.1450]
+
+---------------------------------------------
+dataset 2
+
+To further improve the performance by increasing the RBM #iter: maxepoch_rbm = 60;
+
+Setting 2: single device to single device, with RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[6.1166, 8.9577]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.6619, 5.2918]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7279, 7.7089]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8177, 6.0828]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.0656, 6.8909]
+
+Setting 3: single device to multi device, with RBM
+1) N8102 (labeled) + Others (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[5.8404, 9.2603]
+
+2) N8102 (labeled) + Others (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8404, 5.5976]
+
+3) N8102 (labeled) + Others (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8404, 7.6340]
+
+4) N8102 (labeled) + Others (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8404, 6.0747]
+
+5) N8102 (labeled) + Others (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8404, 7.0522]
+
+Conclusion:
+when RBM #iter = 60
+Single: [8.9577, 5.2918, 7.7089, 6.0828, 6.8909]
+Others: [9.2603, 5.5976, 7.6340, 6.0747, 7.0522]
+
+Still some small improvement over RBM #iter = 40.
+
+---------------------------------------------
+dataset 2
+
+Because this dataset, the num_vis = 202, which is higher than the previous dataset of num_vis = 109.
+To further tune the num_hid: maxepoch_rbm = 40, num_hid = 200
+
+Setting 2: single device to single device, with RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[6.2275, 8.9162]
+
+2) N8102 (labeled) + EEE900A (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.6941, 5.3481]
+
+3) N8102 (labeled) + N95 (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.7795, 7.7905]
+
+4) N8102 (labeled) + N8101 (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8965, 6.1662]
+
+5) N8102 (labeled) + X61 (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[6.1200, 6.8726]
+
+Setting 3: single device to multi device, with RBM
+1) N8102 (labeled) + Others (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[5.8720, 9.1106]
+
+2) N8102 (labeled) + Others (unlabeled) -> EEE900A (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8720, 5.6509]
+
+3) N8102 (labeled) + Others (unlabeled) -> N95 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8720, 7.5864]
+
+4) N8102 (labeled) + Others (unlabeled) -> N8101 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8720, 6.1847]
+
+5) N8102 (labeled) + Others (unlabeled) -> X61 (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+[5.8720, 7.1448]
+
+Conclusion:
+after increasing the num_hid, no much improvement
+Single: [8.9162, 5.3481, 7.7905, 6.1662, 6.8726]
+Others: [9.1106, 5.6509, 7.5864, 6.1847, 7.1448]
+
+---------------------------------------------------
+
+further tune model to bring down the error
+
+a baseline: num_hid = 100, maxepoch_rbm = 40
+Setting 2: single device to single device, with RBM
+1) N8102 (labeled) + D901C (unlabeled) -> D901C (test), 
+weight_unlabel   = 0.01; 
+weight_unlabel_rbm  = 1;
+msr learning rate = 0.05;
+[6.2268, 8.9168]
+
+our goal is to reduce 8.9169 
+starting parameters:
+epsilonr      = 1;	 % hinge loss epsilon 
+epsilonw      = 0.00001; % Learning rate for weights
+epsilonvb     = 0.00001; % Learning rate for biases of visible units
+epsilonhb     = 0.00001; % Learning rate for biases of hidden units
+weightcost  = 0.0002;
+initialmomentum  = 0.5;
+finalmomentum    = 0.9;
+weight_sparse = 0.5;	% Control the weight of sparsity
+weight_pair = 20;	% Control |1^T vishid|_F^2 = 0
+
+1) epsilonr = 0.1; % hinge loss epsilon 
+[6.1908, 8.9049]
+
+2) epsilonr = 0.1, epsilonw = 0.0001, epsilonvb = 0.0001, epsilonhb = 0.0001
+[6.2498, 9.3065]
+
+3) epsilonr = 0.1, epsilonw = 0.00001, epsilonvb = 0.00001, epsilonhb = 0.00001, finalmomentum = 0.9 -> 0.5
+[6.8886, 9.3272]
+
+4) epsilonr = 0.1, epsilonw = 0.00001, epsilonvb = 0.00001, epsilonhb = 0.00001, finalmomentum = 0.9, initialmomentum  = 0.5 -> 0.9
+[6.2451, 8.9525]
+
+5) epsilonr = 0.1, epsilonw = 0.00001, epsilonvb = 0.00001, epsilonhb = 0.00001, finalmomentum = 0.9, initialmomentum  = 0.5 -> 0.2
+[6.2387, 8.9237]
+
+6) weight_margin  = 0.001 -> 0.01
+[6.4174, 9.0243]
+
+7) weight_margin  = 0.001 -> 0.0001
+[6.2108, 8.9109]
+
+8) weight_pair = 20 -> 200
+[6.2286, 8.9161]
+
+9) weight_pair = 20 -> 2
+[6.2478, 8.9265]
+
+10) weight_pair = 20 -> 100
+[6.2292, 8.9184]
+
+11) weight_sparse = 0.5 -> 5
+[8.7089, 11.4334]
+
+12) weight_sparse = 0.5 -> 0.05
+[6.2733, 8.8874]
+
+13) weight_sparse = 0.05 -> 0.005
+[6.2755, 8.8973]
+
+14) weight_sparse = 0.05 -> 0.01
+[6.2712, 8.8936]
+
+15) 
+
+
+--------------------
+HLF
+discrete = 256, binsize = 0.2: 
+[0.1696, 29.4613]
+
+discrete = 256, binsize = 0.02
+[0.1612, 29.8884]
+
+discrete = 128, binsize = 0.02
+[0.1500, 29.9270]
+
+xmax = -30, discrete = 256, binsize = 0.02
+[0.1542, 29.7423]
+
+do not normalized, 
+[0.1766, 29.8923]
+
+discrete = 256, binsize = 1
+[0.2621, 28.9794]
+
+discrete = 256, binsize = 5
+[0.2537, 18.9292]
+
+discrete = 256, binsize = 10
+[20.9050, 20.9050]
+
+discrete = 256, binsize = 8
+[0.3561, 19.3699]
+
+discrete = 256, binsize = 9
+[2.3131, 8.9565]
+
+
+-----------------
+HLF 
+binsize = 9, min=-120, max=-10
+[15.2116, 15.0405]
+
+binsize = 1, min=-120, max=-10
+[0.5310, 8.9338]
+
+binsize = 0.2, min=-120, max=-10
+[0.0447, 5.4888]
+
+binsize = 0.02, min=-120, max=-10
+[0.0103. 7.9382]
+
+
+
+-----------------
+ULFT
+EM iter = 10
+[0.6942, 10.5542]
+
+EM iter = 20
+[0.6942, 10.7673]
+
+EM iter = 1
+[0.6942, 10.4515]
+
+EM iter = 0
+[0.6942, 13.1257]
+
+EM iter = 5
+[0.6942, 10.5000]
+
+
+-------------------
+HLF_SVR, 
+
+HKUST
+C = 1, (-120, -10), -t = 0
+[1.5870, 13.8064]
+
+C = 10, (-120, -10), -t = 0
+[2.0870, 15.0439]
+
+C = 1 (-100, -20), -t = 0
+[1.6573, 12.8479]
+
+C = 10 (-100, -20), -t = 0
+[3.7135, 14.3139]
+
+C = 1 (-100, -20), -t = 1
+[0.9820, 18.5341]
+
+C = 1 (-100, -20), -t = 0, p = 1
+[1.6698, 12.6344]
+
+C = 1 (-100, -20), -t = 0, p = 10
+[8.6126, 16.3422]
+
+
+MIT
+C = 1 (-100, -20), -t = 0, p = 1
+D901C = [7.0261, 9.4562]
+EEE900A = []
+
+
+
+

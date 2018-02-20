@@ -1,0 +1,17 @@
+function [m] = Tensor2Matrix(t)
+
+%% This program converts a tensor (ndim1, ndim2, ndim3) into a matrix (ndim1*ndim3, ndim2)
+%
+% The program assumes that the following variables are set externally:
+% t  -- the tensor, whose dimensions are (ndim1, ndim2, ndim3)
+%
+% The program outputs the following variables:
+% m  -- the matrix, whose dimensions are (ndim1*ndim3, ndim2)
+
+[ndim1, ndim2, ndim3] = size(t);
+m = [];
+for i = 1:ndim3
+    m = [m; t(:,:,i)];
+end
+
+end

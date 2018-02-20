@@ -1,0 +1,45 @@
+function [errdistA errdistB] = TestOnlyA()
+
+% device A full, device B none, no MTL
+
+load Data_all_device.mat;
+
+% ------ test device B ---------
+
+% for x-coordinate
+X = X1trn;
+Y = P1trn(:,1);
+model = svmtrain(Y, X, '-s 3 -t 0');
+
+Y = P1tst(:,1);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, X, model);
+P1pre = tstYx;
+
+Y = P2tst(:,1);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, X, model);
+P2pre = tstYx;
+
+% for y-coordinate
+X = X1trn;
+Y = P1trn(:,2);
+model = svmtrain(Y, X, '-s 3 -t 0');
+
+Y = P1tst(:,2);
+X = X1tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, X, model);
+P1pre = [P1pre tstYx];
+
+Y = P2tst(:,2);
+X = X2tst;
+[tstYx, accuracy, dec_values] = svmpredict(Y, X, model);
+P2pre = [P2pre tstYx];
+
+% calculate error distance
+temp = sum((P1pre-P1tst).^2,2);
+errdistA = mean(sqrt(temp));
+
+temp = sum((P2pre-P2tst).^2,2);
+errdistB = mean(sqrt(temp));
+
